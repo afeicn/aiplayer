@@ -30,7 +30,7 @@ object Motion {
     val TAB_SWITCH = 220       // 首页↔发现交叉淡化、胶囊选中态变色
     val PAGE_ENTER = 260       // 二级页进入（右移 24dp + 淡入）
     val PAGE_EXIT = 200        // 二级页退出（反向）
-    val DETAIL_ENTER = 3000    // 详情海报转场（共享元素形变时长）［临时调试 3000，验完回 360］
+    val DETAIL_ENTER = 360    // 详情海报转场（共享元素形变时长）
     val DETAIL_CONTENT_DELAY = 180 // 详情文案在转场后段才浮现，让海报先落位
     val SHEET_OPEN = 300
     val SHEET_CLOSE = 240

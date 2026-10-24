@@ -48,66 +48,10 @@ val heroShape = RoundedCornerShape(26.dp)
 
 @Composable
 fun SoftPage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    val palette = MaterialTheme.colorScheme
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(palette.background, palette.background, palette.surfaceVariant.copy(alpha = .38f))
-                )
-            )
-    ) {
-        AmbientGlow()
+    // 纯色底：此前底部渐变 + 漂移光晕在浅紫底上叠出灰紫色雾块，白色卡片像蒙了层脏底，已整体移除。
+    Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         content()
     }
-}
-
-/** 选集面板等半透明浮层打开时置真：背景光晕停漂，省掉每帧全屏重绘，给浮层动画让出帧预算。 */
-val LocalAmbientGlowPaused = compositionLocalOf { false }
-
-/**
- * 主题色光晕：两团极浅的紫色光斑在页面底缓慢漂移，给静态页面一点呼吸感。
- * 透明度刻意压到 0.10 以下，似有若无，不干扰内容阅读。
- * 浮层打开（[LocalAmbientGlowPaused]）时不再挂无限动画，静态画一帧即可。
- */
-@Composable
-fun AmbientGlow() {
-    val primary = MaterialTheme.colorScheme.primary
-    if (LocalAmbientGlowPaused.current) {
-        Canvas(Modifier.fillMaxSize()) { drawAmbientGlow(primary, 0f) }
-        return
-    }
-    val transition = rememberInfiniteTransition(label = "glow")
-    val t by transition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(18000), RepeatMode.Reverse),
-        label = "drift"
-    )
-    Canvas(Modifier.fillMaxSize()) { drawAmbientGlow(primary, t) }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAmbientGlow(primary: Color, t: Float) {
-    val w = size.width
-    val h = size.height
-    // 光斑一：左上向右下漂，18 秒一个来回。
-    val c1 = Offset(w * (0.15f + 0.25f * t), h * (0.10f + 0.12f * t))
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(primary.copy(alpha = 0.10f), Color.Transparent),
-            center = c1, radius = w * 0.55f
-        ),
-        radius = w * 0.55f, center = c1
-    )
-    // 光斑二：右下向左上漂，与光斑一反向，避免整页同频摆动。
-    val c2 = Offset(w * (0.88f - 0.22f * t), h * (0.58f - 0.14f * t))
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(primary.copy(alpha = 0.07f), Color.Transparent),
-            center = c2, radius = w * 0.5f
-        ),
-        radius = w * 0.5f, center = c2
-    )
 }
 
 /** 影视图床常直接拒绝非浏览器 UA 的请求（浏览器能开、App 打不开），图片请求统一伪装成浏览器。 */
@@ -164,7 +108,7 @@ fun ToolbarButton(image: ImageVector, description: String, onClick: () -> Unit, 
     Box {
         Surface(
             onClick = onClick,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = .83f),
+            color = MaterialTheme.colorScheme.surface,
             shape = CircleShape,
             shadowElevation = 2.dp,
             modifier = Modifier.size(38.dp)
@@ -385,7 +329,7 @@ fun MiniSeriesCard(title: String, cover: String, subtitle: String, onClick: () -
     val palette = MaterialTheme.colorScheme
     Surface(
         onClick = onClick, modifier = modifier.width(186.dp), shape = cardShape,
-        color = palette.surface.copy(alpha = .88f), shadowElevation = 3.dp,
+        color = palette.surface, shadowElevation = 3.dp,
         border = BorderStroke(.5.dp, palette.outline.copy(alpha = .14f))
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -421,7 +365,7 @@ fun VodRow(vod: AggregatedVod, onClick: () -> Unit) {
     val subtitle = listOf(vod.year, vod.area, vod.remarks).filter { it.isNotBlank() }.joinToString(" · ")
     Row(
         Modifier.fillMaxWidth().clip(cardShape)
-            .background(palette.surface.copy(alpha = .86f))
+            .background(palette.surface)
             .clickable(onClick = onClick),
         // 海报是最高元素、撑起卡片；文字列与「N 个源」胶囊都垂直居中，不再顶在上沿。
         verticalAlignment = Alignment.CenterVertically

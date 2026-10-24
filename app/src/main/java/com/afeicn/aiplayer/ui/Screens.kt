@@ -4,6 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import android.net.Uri
+import android.content.Intent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -114,7 +116,7 @@ fun HomeScreen(
                     RevealOnEnter {
                     Column(
                         Modifier.fillMaxWidth().clip(heroShape)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = .72f)),
+                            .background(MaterialTheme.colorScheme.surface),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -1230,7 +1232,7 @@ fun SourcesScreen(
                 }
             }
             item {
-                // 页脚：版本号取自安装包 versionName，版权署名固定。
+                // 页脚：版本号取自安装包 versionName，版权署名固定；GitHub 图标跳开源仓库。
                 val context = LocalContext.current
                 val version = remember(context) {
                     runCatching {
@@ -1244,8 +1246,28 @@ fun SourcesScreen(
                 ) {
                     Text(if (version.isNotEmpty()) "AI Player v$version" else "AI Player",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("© 2026 afeicn · 供AI爱好者研究交流学习使用",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                // 仓库地址集中在这里；开源后改这一处即可。
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW,
+                                            Uri.parse("https://github.com/afeicn/aiplayer"))
+                                    )
+                                }
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(painterResource(R.drawable.ic_github), "开源仓库",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("© 2026 afeicn · 供AI爱好者研究交流学习使用",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }

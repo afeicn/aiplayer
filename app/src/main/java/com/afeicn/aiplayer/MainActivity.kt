@@ -230,8 +230,6 @@ private fun PlayerApp(activity: ComponentActivity) {
         }
     }
 
-    // 选集面板打开时背景光晕停漂：浮层动画期间省掉每帧全屏 Canvas 重绘。
-    CompositionLocalProvider(LocalAmbientGlowPaused provides (sheetTarget != null)) {
     SoftPage {
         // 共享元素转场容器：卡片海报与详情海报在页面切换间配对飞移。
         SharedTransitionLayout {
@@ -430,7 +428,6 @@ private fun PlayerApp(activity: ComponentActivity) {
             modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
                 .navigationBarsPadding().padding(bottom = if (page in setOf(Page.HOME, Page.DISCOVER)) 82.dp else 12.dp)
         )
-    }
     }
 
     if (sheetTarget != null) {
