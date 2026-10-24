@@ -1,0 +1,35 @@
+name: 问题反馈
+description: 报告崩溃、播放失败、解析异常等问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 issue，避免重复。
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: 1. 打开… 2. 点击… 3. 期望…实际…
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App 版本与 Android 版本
+      placeholder: 设置页底部可见版本号；如 v0.1.0 / Android 15（小米）
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选）
+      description: adb logcat 相关输出；请自行抹除订阅源地址等隐私信息
+      render: text
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认提交内容不包含订阅源地址等个人/敏感信息
+          required: true

@@ -1,0 +1,37 @@
+# Built outputs
+build/
+*/build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+
+# Local configuration (machine-specific, never commit)
+local.properties
+keystore.properties
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+.vscode/
+captures/
+
+# OS
+.DS_Store
+
+# Working assets & internal notes (not part of the public repo)
+/preview/
+/动效设计截图/
+/动效设计截图.zip
+/ui.png
+/setup.png
+/noresult.png
+/AIPlayer_Motion_Handoff.md
+/docs/CODEX_HANDOFF.md
+*.zip
+
+# 会话产物，不入库
+/ChatGPT 图像*.png
+/动效设计方案.md
