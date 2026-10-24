@@ -265,11 +265,15 @@ class EpisodeSheetViewModel : ViewModel() {
         }
     }
 
-    /** 播放一集：直链模式同步出条目；详情页模式先解析（失败回调 null）。 */
+    /** 播放一集：已下载的直接离线播（只读缓存，不再回网络）；否则直链模式同步出条目、详情页模式先解析（失败回调 null）。 */
     fun play(title: String, episode: EpisodeLink, onResult: (MediaEntry?) -> Unit) {
         // 记「这部剧上次播到第几集」，下次进播放面板给「继续上次播放」。
         AppContainer.playbackProgress.saveLastEpisode(title, episode.index)
         _state.value = _state.value.copy(resumeEpisode = episode.index)
+        // 已下载的集优先离线播：同一部剧同一集只播一次，不再回网络解析起播。
+        OfflineLibrary.downloadedEpisode(
+            OfflineDownloadManager.downloads.value, title, episode.index, episode.name
+        )?.let { onResult(it.mediaEntry()); return }
         val source = directSource
         if (source != null) {
             val line = directLines.getOrNull(episode.index - 1)

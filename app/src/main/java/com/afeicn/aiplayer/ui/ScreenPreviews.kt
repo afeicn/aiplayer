@@ -92,7 +92,7 @@ fun HomeScreenPreview() {
     AIPlayerTheme {
         SoftPage {
             HomeScreen(previewHomeState, onSearch = {}, onDownloads = {}, onSources = {},
-                downloadCount = 2, onDetails = {}, onPlay = {}, onPlayRecent = {}, onOpenRecent = {})
+                downloadCount = 2, onOpenSeries = {}, onPlay = {}, onPlayRecent = {}, onOpenRecent = {})
             Box(
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .navigationBarsPadding().padding(bottom = 9.dp)

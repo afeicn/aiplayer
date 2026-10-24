@@ -20,7 +20,15 @@
 
 ## 截图
 
-> 演示素材整理中（需使用无版权风险的占位内容重拍），敬请期待。
+| 首页 · 续播与下载概览 | 发现 · 搜索历史与推荐 | 跨源搜索结果 |
+|:---:|:---:|:---:|
+| <img src="docs/screens/home.png" width="200"> | <img src="docs/screens/discover.png" width="200"> | <img src="docs/screens/search.png" width="200"> |
+
+| 剧集详情 | 下载管理 | 横屏播放器 |
+|:---:|:---:|:---:|
+| <img src="docs/screens/detail.png" width="200"> | <img src="docs/screens/downloads.png" width="200"> | <img src="docs/screens/player.png" width="340"> |
+
+> 截图中的订阅源与片单均为演示数据；本仓库不内置任何视频源。
 
 ## 构建
 

@@ -66,7 +66,7 @@ fun HomeScreen(
     onDownloads: () -> Unit,
     onSources: () -> Unit,
     downloadCount: Int,
-    onDetails: (DownloadedSeries) -> Unit,
+    onOpenSeries: (DownloadedSeries) -> Unit,
     onPlay: (DownloadedSeries) -> Unit,
     onPlayRecent: (RecentPlay) -> Unit,
     onOpenRecent: (RecentPlay) -> Unit
@@ -81,6 +81,8 @@ fun HomeScreen(
     val fallback = if (hero == null) state.series.maxByOrNull { it.newestCompletedAt } else null
     // 大卡与横滑小卡可能同一部作品：共享元素 key 同页只能出现一次，重复的那张让给大卡。
     val heroTitle = hero?.title ?: fallback?.title
+    // 一部剧只有一个条目：已下载的剧不再出现在「最近浏览」，「已下载」卡就是它的入口。
+    val recentRow = state.recent.filter { r -> state.series.none { OfflineLibrary.sameTitle(it.title, r.title) } }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         ScreenHeader("AI Player", onSearch, onDownloads, onSources, downloadCount = downloadCount,
             logoMark = true)
@@ -97,14 +99,14 @@ fun HomeScreen(
                         subtitle = heroSeries?.countLabel
                             ?: if (hero.lastEpisode > 0) "上次看到第 ${hero.lastEpisode} 集" else "最近播放",
                         cover = hero.cover,
-                        onDetail = { heroSeries?.let(onDetails) ?: onOpenRecent(hero) },
+                        onDetail = { heroSeries?.let(onOpenSeries) ?: onOpenRecent(hero) },
                         onPlay = { heroSeries?.let(onPlay) ?: onPlayRecent(hero) }
                     )
                 }
             } else if (fallback != null) {
                 item {
                     HeroCard("最近下载", fallback.title, fallback.countLabel, fallback.cover,
-                        onDetail = { onDetails(fallback) }, onPlay = { onPlay(fallback) })
+                        onDetail = { onOpenSeries(fallback) }, onPlay = { onPlay(fallback) })
                 }
             } else {
                 // 既没播过也没下载过：空态插画占住大卡位置，首页顶部不至于空一块。
@@ -147,7 +149,7 @@ fun HomeScreen(
                         items(state.series) { series ->
                             val total = series.totalEpisodes
                             MiniSeriesCard(series.title, series.cover, series.countLabel,
-                                onClick = { onDetails(series) },
+                                onClick = { onOpenSeries(series) },
                                 progress = if (total > 0) series.downloadedCount.toFloat() / total else null,
                                 sharedKey = if (heroTitle != null && OfflineLibrary.sameTitle(series.title, heroTitle))
                                     null else posterKey(series.title))
@@ -155,27 +157,25 @@ fun HomeScreen(
                     }
                 }
             }
-            item { HomeSectionHeader("最近浏览") }
-            if (state.recent.isEmpty()) {
-                item {
-                    Text("点进过详情页的作品都会出现在这里", fontSize = 12.sp, lineHeight = 18.sp,
-                        modifier = Modifier.padding(start = 12.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (state.recent.isNotEmpty()) {
+            if (recentRow.isNotEmpty()) {
+                item { HomeSectionHeader("最近浏览") }
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(state.recent) { r ->
-                            val matched = state.series.firstOrNull { OfflineLibrary.sameTitle(it.title, r.title) }
+                        items(recentRow) { r ->
                             MiniSeriesCard(r.title, r.cover,
-                                matched?.countLabel
-                                    ?: if (r.lastEpisode > 0) "看到第 ${r.lastEpisode} 集" else "最近浏览",
-                                onClick = { matched?.let(onDetails) ?: onOpenRecent(r) },
+                                if (r.lastEpisode > 0) "看到第 ${r.lastEpisode} 集" else "最近浏览",
+                                onClick = { onOpenRecent(r) },
                                 sharedKey = if (heroTitle != null && OfflineLibrary.sameTitle(r.title, heroTitle))
                                     null else posterKey(r.title))
                         }
                     }
+                }
+            } else if (state.recent.isEmpty()) {
+                item { HomeSectionHeader("最近浏览") }
+                item {
+                    Text("点进过详情页的作品都会出现在这里", fontSize = 12.sp, lineHeight = 18.sp,
+                        modifier = Modifier.padding(start = 12.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

@@ -245,6 +245,23 @@ class OfflineLibraryTest {
     }
 
     @Test
+    fun downloadedEpisode_命中返回条目否则null() {
+        val downloads = listOf(
+            dl(item("1", "狂飙", episodeName = "第01集")),
+            dl(item("2", "狂飙", episodeName = "第03集")),
+            dl(item("3", "狂飙", episodeName = "第05集"), state = DownloadTaskState.DOWNLOADING)
+        )
+        assertEquals("1", OfflineLibrary.downloadedEpisode(downloads, "狂飙", 1)?.id)
+        assertEquals("2", OfflineLibrary.downloadedEpisode(downloads, "狂飙", 3)?.id)
+        // 未下载 / 下载中都不算命中。
+        assertNull(OfflineLibrary.downloadedEpisode(downloads, "狂飙", 2))
+        assertNull(OfflineLibrary.downloadedEpisode(downloads, "狂飙", 5))
+        assertNull(OfflineLibrary.downloadedEpisode(downloads, "庆余年", 1))
+        // 集号缺失时按集名回退命中。
+        assertEquals("1", OfflineLibrary.downloadedEpisode(downloads, "狂飙", 0, episodeName = "第01集")?.id)
+    }
+
+    @Test
     fun sameTitle_忽略首尾空白与大小写() {
         assertTrue(OfflineLibrary.sameTitle("狂飙", " 狂飙 "))
         assertTrue(OfflineLibrary.sameTitle("Naruto", "naruto"))

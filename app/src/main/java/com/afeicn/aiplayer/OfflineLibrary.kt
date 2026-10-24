@@ -218,19 +218,29 @@ object OfflineLibrary {
         DownloadTaskState.FAILED, DownloadTaskState.REMOVED -> 0
     }
 
+    /**
+     * 某部剧某一集的已下载条目（未下载返回 null）：优先按集号，集号缺失时按集名回退。
+     * 选集面板点已下载集时用它直接离线播放，不再回网络解析。
+     */
+    fun downloadedEpisode(
+        downloads: List<OfflineDownload>,
+        title: String,
+        index: Int,
+        episodeName: String = ""
+    ): DownloadedEpisode? =
+        episodes(downloads).firstOrNull { e ->
+            sameTitle(e.title, title) &&
+                ((e.episodeNumber != null && e.episodeNumber == index) ||
+                    (episodeName.isNotBlank() && e.episodeName == episodeName))
+        }
+
     /** 某部剧的某一集是否已下载：优先按集号，集号缺失时按集名回退。 */
     fun isEpisodeDownloaded(
         downloads: List<OfflineDownload>,
         title: String,
         index: Int,
         episodeName: String = ""
-    ): Boolean {
-        val eps = episodes(downloads).filter { sameTitle(it.title, title) }
-        return eps.any { e ->
-            (e.episodeNumber != null && e.episodeNumber == index) ||
-                (episodeName.isNotBlank() && e.episodeName == episodeName)
-        }
-    }
+    ): Boolean = downloadedEpisode(downloads, title, index, episodeName) != null
 
     /** 剧名归一化比对（先洗掉 HTML 残渣，再忽略空白与大小写）。 */
     fun sameTitle(a: String, b: String): Boolean {
