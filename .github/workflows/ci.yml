@@ -14,7 +14,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      # 不装 setup-android：runner 自带 Android SDK（许可已接受），缺的组件由 AGP 自动下载。
       - run: chmod +x gradlew
       - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
       - uses: actions/upload-artifact@v4
