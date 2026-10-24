@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// 发布签名材料放在仓库之外（~/.android/），CI 上没有该文件时 release 走未签名构建。
+val releaseKeystoreProps = File(System.getProperty("user.home"), ".android/aiplayer-release.properties")
+
 android {
     namespace = "com.afeicn.aiplayer"
     compileSdk = 36
@@ -12,11 +15,23 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0-ui"
+        versionName = "0.1.0"
+    }
+    signingConfigs {
+        if (releaseKeystoreProps.exists()) {
+            create("release") {
+                val props = java.util.Properties().apply { releaseKeystoreProps.inputStream().use { load(it) } }
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseKeystoreProps.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
