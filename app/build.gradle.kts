@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -20,7 +22,9 @@ android {
     signingConfigs {
         if (releaseKeystoreProps.exists()) {
             create("release") {
-                val props = java.util.Properties().apply { releaseKeystoreProps.inputStream().use { load(it) } }
+                val props = Properties().also { p ->
+                    releaseKeystoreProps.inputStream().use { p.load(it) }
+                }
                 storeFile = file(props.getProperty("storeFile"))
                 storePassword = props.getProperty("storePassword")
                 keyAlias = props.getProperty("keyAlias")
