@@ -1,6 +1,8 @@
 package com.afeicn.aiplayer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -80,5 +82,74 @@ class RecentPlayLogTest {
         assertEquals(1, decoded.size)
         assertEquals(0L, decoded.first().timeMillis)
         assertTrue(RecentPlayLog.decode("").isEmpty())
+    }
+
+    // ==================== detailUrl：老记录兼容 + 直达详情页 ====================
+
+    @Test
+    fun decode_老记录没有detailUrl段也兼容() {
+        // 升级前的行只有 4 段（title|cover|time|playUrl）：detailUrl 留空，其余字段照常。
+        val decoded = RecentPlayLog.decode("三体|http://c/s.jpg|100|http://p/1.html")
+        assertEquals(1, decoded.size)
+        assertEquals("三体", decoded.first().title)
+        assertEquals("http://p/1.html", decoded.first().playUrl)
+        assertEquals("", decoded.first().detailUrl)
+    }
+
+    @Test
+    fun encodeDecodeKeepsDetailUrl() {
+        val entry = RecentPlay("我不是大师", "http://c/a.jpg", 100, "http://p/1.html", "https://v.x.com/detail/9.html")
+        val decoded = RecentPlayLog.decode(RecentPlayLog.encode(listOf(entry)))
+        assertEquals("https://v.x.com/detail/9.html", decoded.single().detailUrl)
+    }
+
+    @Test
+    fun reViewKeepsEarlierDetailUrl() {
+        // 起播记过详情页地址后，再进详情页（浏览不带地址）不能把它冲掉。
+        val played = listOf(RecentPlay("三体", "http://c/s.jpg", 100, "http://p/1", "https://x/detail/1.html"))
+        val merged = RecentPlayLog.merge(played, RecentPlay("三体", "http://c/s.jpg", 300))
+        assertEquals(1, merged.size)
+        assertEquals("https://x/detail/1.html", merged.first().detailUrl)
+    }
+
+    // ==================== 搜索结果匹配：带标记标题剥标记再比 ====================
+
+    private fun card(name: String, detailUrl: String = "") = AggregatedVod(
+        name, "", "", "", "",
+        if (detailUrl.isEmpty()) emptyList()
+        else listOf(SourceHit(OnlineVideoSource("s", "测试源", "https://s.example.com"), VodItem(name), detailUrl))
+    )
+
+    @Test
+    fun hasMatch_带标记标题按剥标记后的剧名认作品() {
+        // 带标记的关键词在源上模糊命中无关作品：不算命中，得换下一个关键词继续搜。
+        assertFalse(RecentPlayLog.hasMatch(listOf(card("庆余年")), "我不是大师[全集]"))
+        // 源返回清洗后的剧名、记录标题带标记：剥标记后同名，算命中。
+        assertTrue(RecentPlayLog.hasMatch(listOf(card("我不是大师")), "我不是大师[全集]"))
+    }
+
+    @Test
+    fun matchCard_同名卡优先否则第一张兜底() {
+        val cards = listOf(card("别的剧"), card("我不是大师"))
+        assertEquals("我不是大师", RecentPlayLog.matchCard(cards, "我不是大师[全集]")?.name)
+        assertEquals("别的剧", RecentPlayLog.matchCard(cards, "搜不到的剧")?.name)
+        assertNull(RecentPlayLog.matchCard(emptyList(), "三体"))
+    }
+
+    @Test
+    fun directVod_凭详情页地址构造详情卡跳过搜索() {
+        val r = RecentPlay("我不是大师[全集]", "http://c/a.jpg", 100, "", "https://v.x.com/detail/9.html")
+        val configured = listOf(OnlineVideoSource("x", "X站", "https://v.x.com/", referer = "https://v.x.com/"))
+        val built = RecentPlayLog.directVod(r, configured)!!
+        assertEquals("我不是大师[全集]", built.name)
+        assertEquals(listOf("https://v.x.com/detail/9.html"), built.detailUrls)
+        // 同来源的已配置源优先（请求头、referer 齐全）。
+        assertEquals("x", built.hits.single().source.id)
+        // 没有同来源已配置源：按 URL 来源构造轻量源。
+        val fallback = RecentPlayLog.directVod(r, emptyList())!!
+        assertEquals("https://v.x.com", fallback.hits.single().source.base)
+        // 没有详情页地址、或地址不是可识别的 http(s) 来源：返回 null 交回搜索链路。
+        assertNull(RecentPlayLog.directVod(r.copy(detailUrl = ""), configured))
+        assertNull(RecentPlayLog.directVod(r.copy(detailUrl = "javascript:void(0)"), configured))
     }
 }

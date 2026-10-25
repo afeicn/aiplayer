@@ -147,7 +147,10 @@ private fun PlayerApp(activity: ComponentActivity) {
         // 点进过详情页，作品就进首页「最近浏览」；在线结果顺带记上海报，离线剧记封面。
         when (target) {
             is DetailTarget.Online ->
-                AppContainer.playbackProgress.recordView(target.vod.name, target.vod.pic, System.currentTimeMillis())
+                AppContainer.playbackProgress.recordView(
+                    target.vod.name, target.vod.pic, System.currentTimeMillis(),
+                    target.vod.detailUrls.firstOrNull().orEmpty()
+                )
             is DetailTarget.Offline ->
                 AppContainer.playbackProgress.recordView(target.series.title, target.series.cover, System.currentTimeMillis())
         }
@@ -169,7 +172,10 @@ private fun PlayerApp(activity: ComponentActivity) {
         // 播过一集，作品就进首页「最近浏览」；在线作品顺带记播放页地址，供大卡续播重新解析。
         when (sheet) {
             is SheetTarget.Online ->
-                AppContainer.playbackProgress.recordPlay(sheet.vod.name, sheet.vod.pic, playUrl, System.currentTimeMillis())
+                AppContainer.playbackProgress.recordPlay(
+                    sheet.vod.name, sheet.vod.pic, playUrl, System.currentTimeMillis(),
+                    sheet.vod.detailUrls.firstOrNull().orEmpty()
+                )
             is SheetTarget.Continue ->
                 AppContainer.playbackProgress.recordPlay(sheet.series.title, sheet.series.cover, "", System.currentTimeMillis())
             null -> Unit
@@ -317,9 +323,16 @@ private fun PlayerApp(activity: ComponentActivity) {
                     val series = homeState.series.firstOrNull { OfflineLibrary.sameTitle(it.title, r.title) }
                     if (series != null) openDetails(DetailTarget.Offline(series))
                     else {
-                        homeVm.findRecentVod(r.title) { vod ->
-                            if (vod != null) openDetails(DetailTarget.Online(vod))
-                            else { query = r.title; searchVm.search(r.title); page = Page.DISCOVER }
+                        // 记录里有详情页地址就直接构造详情卡，跳过按标题搜索
+                        // （「我不是大师[全集]」这类带标记标题常在源上搜不到，搜到也常是无关作品）。
+                        val direct = RecentPlayLog.directVod(r, AppContainer.sourceStore.sources())
+                        if (direct != null) openDetails(DetailTarget.Online(direct))
+                        else {
+                            homeVm.findRecentVod(r.title) { vod ->
+                                if (vod != null) openDetails(DetailTarget.Online(vod))
+                                // 缓存和搜索都定位不到：留在首页提示，不再跳发现页触发可见搜索。
+                                else scope.launch { snackbar.showSnackbar("找不到「${r.title}」，可能已下架") }
+                            }
                         }
                     }
                 }

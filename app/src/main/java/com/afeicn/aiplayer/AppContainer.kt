@@ -68,18 +68,18 @@ class PlaybackProgressStore(context: Context) {
 
     fun lastEpisodeOf(title: String): Int = prefs.getInt("ep:${MediaTitle.clean(title)}", 0)
 
-    /** 播过一集就把作品记进「最近浏览」：带续播地址，新记录置顶、同名去重、封顶 12 条。 */
-    fun recordPlay(title: String, cover: String, playUrl: String, timeMillis: Long) {
+    /** 播过一集就把作品记进「最近浏览」：带续播地址与详情页地址，新记录置顶、同名去重、封顶 12 条。 */
+    fun recordPlay(title: String, cover: String, playUrl: String, timeMillis: Long, detailUrl: String = "") {
         val merged = RecentPlayLog.merge(
             RecentPlayLog.decode(prefs.getString("recent", "").orEmpty()),
-            RecentPlay(title, cover, timeMillis, playUrl)
+            RecentPlay(title, cover, timeMillis, playUrl, detailUrl)
         )
         prefs.edit().putString("recent", RecentPlayLog.encode(merged)).apply()
     }
 
-    /** 点进过详情页就记进「最近浏览」：只更新时间置顶，不冲掉已有的续播地址。 */
-    fun recordView(title: String, cover: String, timeMillis: Long) {
-        recordPlay(title, cover, "", timeMillis)
+    /** 点进过详情页就记进「最近浏览」：记上详情页地址（供下次直达），只更新时间置顶，不冲掉已有的续播地址。 */
+    fun recordView(title: String, cover: String, timeMillis: Long, detailUrl: String = "") {
+        recordPlay(title, cover, "", timeMillis, detailUrl)
     }
 
     fun recentPlays(): List<RecentPlay> =

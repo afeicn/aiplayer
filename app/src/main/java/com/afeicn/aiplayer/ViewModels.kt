@@ -492,7 +492,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 首页大卡点主体：优先吃 [recentVodCache] 缓存（首页加载时已预取），秒开进详情；
      * 缓存没有才后台按剧名搜索（原标题搜不到就逐级换更短的关键词）。
-     * 回调返回最匹配的结果卡；null = 哪一级都没搜到，界面退回发现页兜底。
+     * 回调返回最匹配的结果卡；null = 哪一级都没搜到，界面留在首页提示（不跳发现页）。
      */
     fun findRecentVod(title: String, onResult: (AggregatedVod?) -> Unit) {
         cachedRecentVod(title)?.let { onResult(it); return }
@@ -511,7 +511,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         recentVodCache[MediaTitle.normalize(title)]
 
     private fun cacheRecentVod(title: String, cards: List<AggregatedVod>): AggregatedVod? {
-        val vod = cards.firstOrNull { OfflineLibrary.sameTitle(it.name, title) } ?: cards.firstOrNull()
+        val vod = RecentPlayLog.matchCard(cards, title)
         if (vod != null) recentVodCache[MediaTitle.normalize(title)] = vod
         return vod
     }
@@ -574,17 +574,24 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 按 MediaTitle.searchKeys 的候选关键词逐级跨源搜索，第一个有结果的关键词胜出。 */
+    /**
+     * 按 MediaTitle.searchKeys 的候选关键词逐级跨源搜索：优先取「结果里真有这部剧」的关键词
+     * （剥掉「[全集]」等标记再比剧名）——带标记的关键词常在源上模糊命中无关作品，不能算命中；
+     * 所有关键词都没有同名结果时，才退回第一个有结果的关键词兜底。
+     */
     private fun searchRecentVod(title: String, onResult: (List<AggregatedVod>) -> Unit) {
         viewModelScope.launch {
             val cards = withContext(Dispatchers.IO) {
+                var firstNonEmpty: List<AggregatedVod> = emptyList()
                 for (keyword in MediaTitle.searchKeys(title)) {
                     val found = runCatching {
                         VodAggregator.aggregate(AppContainer.searchEngine.search(keyword).hits)
                     }.getOrDefault(emptyList())
-                    if (found.isNotEmpty()) return@withContext found
+                    if (found.isEmpty()) continue
+                    if (RecentPlayLog.hasMatch(found, title)) return@withContext found
+                    if (firstNonEmpty.isEmpty()) firstNonEmpty = found
                 }
-                emptyList()
+                firstNonEmpty
             }
             onResult(cards)
         }
