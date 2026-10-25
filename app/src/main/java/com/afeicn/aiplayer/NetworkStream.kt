@@ -56,10 +56,18 @@ fun buildRequestHeaders(
     referer?.trim()?.takeIf { it.isNotEmpty() }?.let { put("Referer", it) }
 }
 
-/** 把网络流转成现有播放链路用的 [MediaEntry]（不落库，只做一次播放会话）。 */
-fun networkStreamEntry(stream: NetworkStream): MediaEntry = MediaEntry(
+/**
+ * 把网络流转成现有播放链路用的 [MediaEntry]（不落库，只做一次播放会话）。
+ * 解析播放页时调用方知道所属剧名与集号，就把它们传进来：播放页据此持久化观看进度，
+ * 不依赖 [NetworkStream.title]（可能只是网页标题，无法可靠拆出集号）。
+ */
+fun networkStreamEntry(
+    stream: NetworkStream,
+    seriesTitle: String? = null,
+    episodeNumber: Int? = null
+): MediaEntry = MediaEntry(
     uri = stream.uri,
-    name = stream.displayTitle,
+    name = seriesTitle?.takeIf { it.isNotBlank() } ?: stream.displayTitle,
     kind = MediaKind.VIDEO,
     folder = "网络地址",
     extension = stream.extension,
@@ -67,7 +75,8 @@ fun networkStreamEntry(stream: NetworkStream): MediaEntry = MediaEntry(
     lastModified = 0L,
     title = stream.title,
     networkHeaders = stream.headers,
-    isLive = stream.isLive
+    isLive = stream.isLive,
+    episodeNumber = episodeNumber
 )
 
 /** 拉取 m3u / m3u8 播放列表文本（用于频道列表解析），带可选自定义请求头。 */

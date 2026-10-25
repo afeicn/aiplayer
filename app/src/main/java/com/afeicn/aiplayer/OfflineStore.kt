@@ -71,7 +71,11 @@ data class OfflineItem(
         lastModified = createdAt,
         title = MediaTitle.clean(episodeName),
         networkHeaders = headers,
-        offlineOnly = true
+        offlineOnly = true,
+        // 优先用落库的结构化集号；老数据没有时从占位集号 / 集名兜底解析。
+        episodeNumber = this.episodeNumber.takeIf { it > 0 }
+            ?: resolveIndex.takeIf { it > 0 }
+            ?: EpisodeNaming.episodeNumber(episodeName)
     )
 }
 

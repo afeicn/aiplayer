@@ -217,11 +217,15 @@ class EpisodeSheetViewModel : ViewModel() {
             directLines = group.lines
             pageSource = null
             pageDetailUrl = ""
+            val episodes = group.lines.mapIndexed { offset, line -> EpisodeLink(offset + 1, line.name, line.url) }
             _state.value = EpisodeSheetUiState(
                 title = vod.name,
-                episodes = group.lines.mapIndexed { offset, line -> EpisodeLink(offset + 1, line.name, line.url) },
+                episodes = episodes,
                 statuses = OfflineLibrary.episodeStatuses(OfflineDownloadManager.downloads.value, vod.name),
-                resumeEpisode = AppContainer.playbackProgress.lastEpisodeOf(vod.name)
+                // 拿到总集数后顺手校验历史值；超过集数的脏数据按 0 处理。
+                resumeEpisode = AppContainer.playbackProgress.validatedLastEpisodeOf(
+                    vod.name, episodes.maxOfOrNull { it.index } ?: 0
+                )
             )
             return
         }
@@ -300,7 +304,9 @@ class EpisodeSheetViewModel : ViewModel() {
                             title = title,
                             episodes = list,
                             statuses = OfflineLibrary.episodeStatuses(OfflineDownloadManager.downloads.value, title),
-                            resumeEpisode = AppContainer.playbackProgress.lastEpisodeOf(title),
+                            resumeEpisode = AppContainer.playbackProgress.validatedLastEpisodeOf(
+                                title, list.maxOfOrNull { it.index } ?: 0
+                            ),
                             notice = if (fetched.aiAssisted) "AI 智能解析出的集数，个别集可能不准" else null
                         )
                         // 详情页顺带提取主海报：给下载记录与「最近浏览」补图（部分源搜索结果本身没图）。
@@ -326,8 +332,8 @@ class EpisodeSheetViewModel : ViewModel() {
 
     /** 播放一集：已下载的直接离线播（只读缓存，不再回网络）；否则直链模式同步出条目、详情页模式先解析（失败回调 null）。 */
     fun play(title: String, episode: EpisodeLink, onResult: (MediaEntry?) -> Unit) {
-        // 记「这部剧上次播到第几集」，下次进播放面板给「继续上次播放」。
-        AppContainer.playbackProgress.saveLastEpisode(title, episode.index)
+        // 记「这部剧上次播到第几集」，下次进播放面板给「继续上次播放」；同时记住总集数供越界校验。
+        AppContainer.playbackProgress.saveLastEpisode(title, episode.index, knownEpisodeTotal())
         _state.value = _state.value.copy(resumeEpisode = episode.index)
         // 已下载的集优先离线播：同一部剧同一集只播一次，不再回网络解析起播。
         OfflineLibrary.downloadedEpisode(
@@ -336,7 +342,7 @@ class EpisodeSheetViewModel : ViewModel() {
         val source = directSource
         if (source != null) {
             val line = directLines.getOrNull(episode.index - 1)
-            onResult(line?.let { onlineStreamEntry(source, it, title) })
+            onResult(line?.let { onlineStreamEntry(source, it, title, episode.index) })
             return
         }
         _state.value = _state.value.copy(resolvingEpisode = episode.index)
@@ -345,9 +351,13 @@ class EpisodeSheetViewModel : ViewModel() {
                 withContext(Dispatchers.IO) { SubscriptionPipeline.resolveStream(episode.url) }
             }.getOrNull()
             _state.value = _state.value.copy(resolvingEpisode = null)
-            onResult(stream?.let { networkStreamEntry(it) })
+            onResult(stream?.let { networkStreamEntry(it, title, episode.index) })
         }
     }
+
+    /** 当前面板已知的最大集号；没有集数时返回 0（不写总集数）。 */
+    private fun knownEpisodeTotal(): Int =
+        _state.value.episodes.maxOfOrNull { it.index } ?: 0
 
     /** 确认范围下载：直链模式直接入队；详情页模式落「获取地址中」占位、后台逐集解析。 */
     fun download(title: String, selected: Set<Int>) {
@@ -520,12 +530,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun publish() {
         val episodes = OfflineLibrary.episodes(OfflineDownloadManager.downloads.value)
+        val series = OfflineLibrary.groupByTitle(episodes)
+        val store = AppContainer.playbackProgress
         _state.value = HomeUiState(
-            series = OfflineLibrary.groupByTitle(episodes),
-            lastSeriesTitle = AppContainer.playbackProgress.lastSeriesTitle(),
+            series = series,
+            lastSeriesTitle = store.lastSeriesTitle(),
             cacheSizeText = OfflineDownloadManager.cacheSizeText(AppContainer.appContext),
-            recent = AppContainer.playbackProgress.recentPlays()
-                .map { it.copy(lastEpisode = AppContainer.playbackProgress.lastEpisodeOf(it.title)) }
+            // 首页每次发布都重新读集号；离线剧知道自己总集数时顺手校验，启动时就能把越界脏值归零。
+            recent = store.recentPlays().map { play ->
+                val total = series.firstOrNull { OfflineLibrary.sameTitle(it.title, play.title) }
+                    ?.totalEpisodes ?: 0
+                play.copy(
+                    lastEpisode = if (total > 0) store.validatedLastEpisodeOf(play.title, total)
+                    else store.lastEpisodeOf(play.title)
+                )
+            }
         )
     }
 
@@ -539,7 +558,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val stream = runCatching {
                 withContext(Dispatchers.IO) { SubscriptionPipeline.resolveStream(play.playUrl) }
             }.getOrNull()
-            onResult(stream?.let { networkStreamEntry(it) })
+            // 续播的就是记录里那一集：把剧名与集号一起带入，播放页起播后可原样写回。
+            onResult(stream?.let {
+                networkStreamEntry(it, play.title, play.lastEpisode.takeIf { n -> n > 0 })
+            })
         }
     }
 
@@ -597,13 +619,19 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** 已拿到作品卡后的续播解析：MacCMS 直链直接取对应线路；详情页模式抓集数→解析目标集。 */
     private fun resumeFromVod(play: RecentPlay, vod: AggregatedVod, onResult: (RecentResume?) -> Unit) {
         run {
-            val target = AppContainer.playbackProgress.lastEpisodeOf(play.title)
             // MacCMS 直链：线路即集数，不用解析，直接取对应线路。
             val direct = vod.hits.firstOrNull { it.item.playGroups.isNotEmpty() }
             if (direct != null) {
                 val lines = direct.item.playGroups.first().lines
-                val line = lines.getOrNull(target - 1) ?: lines.firstOrNull()
-                onResult(line?.let { RecentResume(vod, onlineStreamEntry(direct.source, it, vod.name), "") })
+                // 已知总集数：越界的历史值按 0（从第一集开始）处理。
+                val target = AppContainer.playbackProgress.validatedLastEpisodeOf(play.title, lines.size)
+                val lineIndex = target.takeIf { it in 1..lines.size }?.minus(1) ?: 0
+                val line = lines.getOrNull(lineIndex) ?: return@run
+                onResult(RecentResume(
+                    vod,
+                    onlineStreamEntry(direct.source, line, vod.name, lineIndex + 1),
+                    ""
+                ))
                 return@run
             }
             // 详情页模式：抓集数 → 取目标集 → 解析真实地址。
@@ -617,6 +645,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                             detailUrl, vod.name, source, HttpPageFetcher(), AppContainer.aiClientOrNull()
                         )
                         val episodes = fetched.episodes
+                        val total = episodes.maxOfOrNull { it.index } ?: 0
+                        val target = AppContainer.playbackProgress.validatedLastEpisodeOf(play.title, total)
                         val ep = episodes.firstOrNull { it.index == target } ?: episodes.firstOrNull()
                             ?: return@withContext null
                         // 顺带给下载记录与「最近浏览」补海报（同一份页面 HTML，不二次抓取）。
@@ -628,8 +658,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         val stream = SubscriptionPipeline.resolveStream(ep.url) ?: return@withContext null
-                        AppContainer.playbackProgress.saveLastEpisode(vod.name, ep.index)
-                        RecentResume(vod, networkStreamEntry(stream), ep.url)
+                        AppContainer.playbackProgress.saveLastEpisode(vod.name, ep.index, total)
+                        RecentResume(vod, networkStreamEntry(stream, vod.name, ep.index), ep.url)
                     }
                 }.getOrNull()
                 onResult(resume)
@@ -1050,6 +1080,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         player.playWhenReady = true
         // 剧名取 name（在线搜索条目 name 是片名、title 是集名；离线条目 name 就是清洗后剧名）。
         if (entry.kind == MediaKind.VIDEO) AppContainer.playbackProgress.saveLastSeries(entry.name)
+        persistEpisode(entry)
+    }
+
+    /**
+     * 真正起播一集时持久化「剧名 → 集号」。
+     *
+     * 集号优先取 [MediaEntry.episodeNumber]（在线线路序号 / 离线下载记录显式带入）；
+     * 只有整条队列从第 1 集连续且每集都带集号时，才允许用 index + 1 兜底——
+     * 离线队列只含已下载的集，缺集时 index 不等于真实集号，不能反推。
+     */
+    private fun persistEpisode(entry: MediaEntry) {
+        val number = entry.episodeNumber?.takeIf { it > 0 } ?: fallbackEpisodeNumber() ?: return
+        AppContainer.playbackProgress.saveLastEpisode(entry.name, number)
+    }
+
+    private fun fallbackEpisodeNumber(): Int? {
+        if (queue.size <= 1 || index !in queue.indices) return null
+        val complete = queue.indices.all { queue[it].episodeNumber == it + 1 }
+        return if (complete) index + 1 else null
     }
 
     fun saveProgress() {

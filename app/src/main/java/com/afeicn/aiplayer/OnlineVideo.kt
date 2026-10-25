@@ -220,7 +220,7 @@ fun buildSourceQueue(selected: AggregatedVod, chosen: PlayableLine): List<MediaE
         val line = group?.lines?.getOrNull(chosen.lineIndex)
             ?: group?.lines?.firstOrNull()
             ?: hit.item.allLines.firstOrNull()
-        line?.let { onlineStreamEntry(source, it, selected.name) }
+        line?.let { onlineStreamEntry(source, it, selected.name, chosen.lineIndex + 1) }
     }
 }
 
@@ -228,8 +228,16 @@ fun buildSourceQueue(selected: AggregatedVod, chosen: PlayableLine): List<MediaE
 fun onlineStream(source: OnlineVideoSource, line: VodPlayLine, title: String): NetworkStream =
     NetworkStream(url = line.url, title = title, headers = source.headers)
 
-/** 一条线路 -> MediaEntry，走第一块的网络播放链路；folder 标记「在线搜索」以便换源识别。 */
-fun onlineStreamEntry(source: OnlineVideoSource, line: VodPlayLine, movieTitle: String): MediaEntry {
+/**
+ * 一条线路 -> MediaEntry，走第一块的网络播放链路；folder 标记「在线搜索」以便换源识别。
+ * [episodeNumber] 由调用方按线路序号显式传入（不靠 index 反推）；未传时从线路名解析。
+ */
+fun onlineStreamEntry(
+    source: OnlineVideoSource,
+    line: VodPlayLine,
+    movieTitle: String,
+    episodeNumber: Int? = null
+): MediaEntry {
     val stream = onlineStream(source, line, movieTitle)
     return MediaEntry(
         uri = stream.uri,
@@ -240,7 +248,8 @@ fun onlineStreamEntry(source: OnlineVideoSource, line: VodPlayLine, movieTitle: 
         sizeBytes = 0L,
         lastModified = 0L,
         title = line.name,
-        networkHeaders = stream.headers
+        networkHeaders = stream.headers,
+        episodeNumber = episodeNumber ?: EpisodeNaming.episodeNumber(line.name)
     )
 }
 

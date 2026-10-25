@@ -26,10 +26,19 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
+import com.afeicn.aiplayer.AggregatedVod
+import com.afeicn.aiplayer.AppContainer
+import com.afeicn.aiplayer.EpisodeSheetViewModel
+import com.afeicn.aiplayer.HomeViewModel
 import com.afeicn.aiplayer.MediaEntry
 import com.afeicn.aiplayer.MediaKind
+import com.afeicn.aiplayer.OnlineVideoSource
 import com.afeicn.aiplayer.PlayerEngine
 import com.afeicn.aiplayer.PlayerViewModel
+import com.afeicn.aiplayer.SourceHit
+import com.afeicn.aiplayer.VodItem
+import com.afeicn.aiplayer.VodPlayGroup
+import com.afeicn.aiplayer.VodPlayLine
 import java.io.File
 
 /**
@@ -45,6 +54,10 @@ class PreviewGalleryActivity : ComponentActivity() {
     /** 复现「上一集/下一集」状态用：和 MainActivity 一样持有真实的 PlayerViewModel。 */
     private val playerVm: PlayerViewModel by viewModels()
 
+    /** 进度持久化联调：用真实的首页/选集 ViewModel 读持久化结果，避免另写一套读取逻辑。 */
+    private val homeVm: HomeViewModel by viewModels()
+    private val sheetVm: EpisodeSheetViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -57,11 +70,19 @@ class PreviewGalleryActivity : ComponentActivity() {
         }
         if (screen == "player-queue") {
             val start = intent.getIntExtra("start", 0)
+            // 与 MainActivity.openPlayer 的离线剧分支一致：播过就进「最近浏览」，
+            // 这样杀进程重进后，首页大卡/最近列表才有可核对的条目。
+            AppContainer.playbackProgress.recordPlay(
+                "队列测试", "", "", System.currentTimeMillis()
+            )
             playerVm.playQueue(demoQueue(), startIndex = start)
+        }
+        if (screen == "sheet-real") {
+            sheetVm.load(demoProgressVod())
         }
         setContent {
             AIPlayerTheme {
-                GalleryScreen(screen, media, playerVm)
+                GalleryScreen(screen, media, playerVm, homeVm, sheetVm)
             }
         }
     }
@@ -72,14 +93,31 @@ class PreviewGalleryActivity : ComponentActivity() {
         return (1..3).map { i ->
             MediaEntry(
                 uri = uri, name = "队列测试", kind = MediaKind.VIDEO,
-                folder = "本地", extension = "mp4", title = "第 $i 集"
+                folder = "本地", extension = "mp4", title = "第 $i 集", episodeNumber = i
             )
         }
+    }
+
+    /** 在线直链演示条目：选集面板走真实 load 分支（不联网），读到持久化的续播集号。 */
+    private fun demoProgressVod(): AggregatedVod {
+        val source = OnlineVideoSource(id = "demo", name = "演示源", base = "https://example.invalid")
+        val lines = (1..15).map { VodPlayLine("第 $it 集", "https://example.invalid/$it.m3u8") }
+        val item = VodItem(vodName = "队列测试", playGroups = listOf(VodPlayGroup("正片", lines)))
+        return AggregatedVod(
+            name = "队列测试", pic = "", year = "", area = "", remarks = "",
+            hits = listOf(SourceHit(source, item))
+        )
     }
 }
 
 @Composable
-private fun GalleryScreen(screen: String, media: String?, playerVm: PlayerViewModel) {
+private fun GalleryScreen(
+    screen: String,
+    media: String?,
+    playerVm: PlayerViewModel,
+    homeVm: HomeViewModel,
+    sheetVm: EpisodeSheetViewModel
+) {
     when (screen) {
         "home" -> SoftPage {
             HomeScreen(previewHomeState, onSearch = {}, onDownloads = {}, onSources = {},
@@ -164,6 +202,25 @@ private fun GalleryScreen(screen: String, media: String?, playerVm: PlayerViewMo
                     onBack = {}, onPrev = { playerVm.prev() }, onNext = { playerVm.next() },
                     onEpisodes = {}, onSaveProgress = {}
                 )
+            }
+        }
+
+        // 进度持久化联调：真实 HomeViewModel 从 SharedPreferences 读，验证重启后首页两处文案。
+        "home-real" -> {
+            val state by homeVm.state.collectAsStateWithLifecycle()
+            SoftPage {
+                HomeScreen(state, onSearch = {}, onDownloads = {}, onSources = {},
+                    downloadCount = state.series.size, onOpenSeries = {}, onPlay = {},
+                    onPlayRecent = {}, onOpenRecent = {})
+            }
+        }
+
+        // 进度持久化联调：真实 EpisodeSheetViewModel.load 读同一份集号，验证续播按钮与高亮。
+        "sheet-real" -> {
+            val state by sheetVm.state.collectAsStateWithLifecycle()
+            SoftPage {
+                EpisodeSheet(state, mode = EpisodeSheetMode.PLAY,
+                    onDismiss = {}, onPlay = {}, onDownload = {})
             }
         }
 

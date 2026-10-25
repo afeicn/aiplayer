@@ -49,6 +49,14 @@ class PlaybackProgressStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("playback_progress", Context.MODE_PRIVATE)
 
+    /** 集号进度的读写规则独立出来，纯 JVM 单测可直接验证 key/覆盖/越界。 */
+    private val episodes = EpisodeIndexStore(object : IntPreferences {
+        override fun getInt(key: String, defaultValue: Int): Int = prefs.getInt(key, defaultValue)
+        override fun putInt(key: String, value: Int) {
+            prefs.edit().putInt(key, value).apply()
+        }
+    })
+
     fun savePosition(uri: String, positionMs: Long) {
         if (positionMs > 5_000L) prefs.edit().putLong("pos:$uri", positionMs).apply()
     }
@@ -61,12 +69,19 @@ class PlaybackProgressStore(context: Context) {
 
     fun lastSeriesTitle(): String? = prefs.getString("last_series", null)
 
-    /** 按剧名记上次播到第几集（在线选集面板的「继续上次播放」用；0 = 没有记录）。 */
-    fun saveLastEpisode(title: String, episodeIndex: Int) {
-        prefs.edit().putInt("ep:${MediaTitle.clean(title)}", episodeIndex).apply()
+    /**
+     * 按剧名记上次播到第几集（首页/选集面板的续播用；0 = 没有记录）。
+     * [totalEpisodes] > 0 时顺带记总集数，供之后判断历史值是否越界。
+     */
+    fun saveLastEpisode(title: String, episodeIndex: Int, totalEpisodes: Int = 0) {
+        episodes.save(title, episodeIndex, totalEpisodes)
     }
 
-    fun lastEpisodeOf(title: String): Int = prefs.getInt("ep:${MediaTitle.clean(title)}", 0)
+    fun lastEpisodeOf(title: String): Int = episodes.lastOf(title)
+
+    /** 已知总集数时读取：越界脏值归零并回写，同时记住总集数。 */
+    fun validatedLastEpisodeOf(title: String, totalEpisodes: Int): Int =
+        episodes.sanitized(title, totalEpisodes)
 
     /** 播过一集就把作品记进「最近浏览」：带续播地址与详情页地址，新记录置顶、同名去重、封顶 12 条。 */
     fun recordPlay(title: String, cover: String, playUrl: String, timeMillis: Long, detailUrl: String = "") {
