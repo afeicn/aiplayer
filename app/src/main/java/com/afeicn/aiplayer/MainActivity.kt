@@ -274,11 +274,8 @@ private fun PlayerApp(activity: ComponentActivity) {
                 onDownloads = { page = Page.DOWNLOADS },
                 onSources = { page = Page.SOURCES },
                 downloadCount = inFlight,
-                // 「已下载」卡片点击直接进播放页（离线队列，起点续上次进度），不再绕详情页。
-                onOpenSeries = { series ->
-                    val (entries, start) = offlineQueue(series)
-                    openPlayer(entries, start, SheetTarget.Continue(series))
-                },
+                // 「已下载」卡片点击进详情页（看集数/海报/管理），播放走卡上的播放按钮。
+                onOpenSeries = { series -> openDetails(DetailTarget.Offline(series)) },
                 onPlay = { series ->
                     val (entries, start) = offlineQueue(series)
                     openPlayer(entries, start, SheetTarget.Continue(series))
@@ -314,14 +311,11 @@ private fun PlayerApp(activity: ComponentActivity) {
                         } else resumeBySearch()
                     }
                 },
-                // 点大卡主体 / 最近浏览条目：已下载直接进播放页（与「已下载」卡同一行为）；
-                // 在线吃预取缓存秒进详情页，缓存没有才后台搜。
+                // 点大卡主体 / 最近浏览条目：一律进详情页（在线吃预取缓存秒进，缓存没有才后台搜）。
+                // 直接起播只走卡上的播放按钮（onPlay / onPlayRecent）。
                 onOpenRecent = { r ->
                     val series = homeState.series.firstOrNull { OfflineLibrary.sameTitle(it.title, r.title) }
-                    if (series != null) {
-                        val (entries, start) = offlineQueue(series)
-                        openPlayer(entries, start, SheetTarget.Continue(series))
-                    }
+                    if (series != null) openDetails(DetailTarget.Offline(series))
                     else {
                         homeVm.findRecentVod(r.title) { vod ->
                             if (vod != null) openDetails(DetailTarget.Online(vod))
