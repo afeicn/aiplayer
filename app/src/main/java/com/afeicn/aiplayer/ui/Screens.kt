@@ -516,7 +516,6 @@ fun DetailScreen(
                     vod.year.takeIf { it.isNotBlank() }?.let { MetaChip(it) }
                     vod.area.takeIf { it.isNotBlank() }?.let { MetaChip(it) }
                     vod.remarks.takeIf { it.isNotBlank() }?.let { MetaChip(it) }
-                    MetaChip("${vod.sourceCount} 个源")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // 播放模式会展开选集列表逐集解析，没有直链但有详情页也能播。
@@ -548,16 +547,6 @@ fun DetailScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                Text("来源站点", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                vod.hits.map { it.source.name }.distinct().forEach { name ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Language, null, modifier = Modifier.size(15.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(6.dp))
-                        Text(name, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
             }
         }
     }
@@ -573,7 +562,17 @@ fun DetailScreen(
     onEpisodePlay: (Int) -> Unit,
     onSelectEpisodes: () -> Unit
 ) {
-    val sourceLabel = ContinueDownloadRules.sourceLabel(series.sourceName)
+    // 简介：下载记录没存简介，凭详情页地址懒抓一次；抓到才显示，失败/为空整块不出现。
+    var blurb by remember(series.title) { mutableStateOf("") }
+    var blurbExpanded by remember(series.title) { mutableStateOf(false) }
+    LaunchedEffect(series.title) {
+        val url = series.detailUrl
+        if (url.isNotBlank()) {
+            blurb = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { VodBlurbParser.extract(HttpPageFetcher().fetch(url, null).body) }.getOrDefault("")
+            }
+        }
+    }
     LazyColumn(
         // 文案在转场后段浮现：海报先飞到位（360ms），标题按钮在 180ms 后淡入补齐。
         Modifier.fillMaxSize().revealDelayed(Motion.DETAIL_CONTENT_DELAY, Motion.DETAIL_ENTER - Motion.DETAIL_CONTENT_DELAY),
@@ -584,10 +583,6 @@ fun DetailScreen(
         item {
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(series.title, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    MetaChip(series.countLabel)
-                    if (sourceLabel.isNotBlank()) MetaChip(sourceLabel)
-                }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PrimaryPill("继续播放", Icons.Default.PlayArrow, onPlay, Modifier.weight(1f))
                     SecondaryPill(ContinueDownloadRules.LABEL, Icons.Default.FileDownload, onSelectEpisodes, Modifier.weight(1f))
@@ -615,6 +610,31 @@ fun DetailScreen(
                             }
                         }
                         repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+        if (blurb.isNotBlank()) item {
+            Surface(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                shape = cardShape, color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(4.dp).height(16.dp).clip(CircleShape).background(Ink.Violet))
+                        Spacer(Modifier.width(8.dp))
+                        Text("剧情简介", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(blurb, fontSize = 13.sp, lineHeight = 21.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (blurbExpanded) Int.MAX_VALUE else 4,
+                        overflow = TextOverflow.Ellipsis)
+                    // 与在线详情页同款：超过 4 行才出「展开」，短简介不打扰。
+                    if (blurb.length > 120) {
+                        TextButton(onClick = { blurbExpanded = !blurbExpanded },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
+                            Text(if (blurbExpanded) "收起" else "展开", fontSize = 13.sp, color = Ink.Violet)
+                        }
                     }
                 }
             }
