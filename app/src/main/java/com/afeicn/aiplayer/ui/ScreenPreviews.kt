@@ -13,9 +13,9 @@ import com.afeicn.aiplayer.*
 
 // 预览用的假状态：全部走真实数据类，不依赖任何演示模型。
 
-private val previewSource = OnlineVideoSource(id = "p1", name = "示例站", base = "https://example.org")
+internal val previewSource = OnlineVideoSource(id = "p1", name = "示例站", base = "https://example.org")
 
-private fun previewSeries(title: String, downloaded: Int) = DownloadedSeries(
+internal fun previewSeries(title: String, downloaded: Int) = DownloadedSeries(
     title = title,
     episodes = (1..downloaded).map { index ->
         DownloadedEpisode(
@@ -28,7 +28,7 @@ private fun previewSeries(title: String, downloaded: Int) = DownloadedSeries(
     cover = "", detailUrl = "https://example.org/vodplay/1.html", sourceName = "示例站"
 )
 
-private val previewHomeState = HomeUiState(
+internal val previewHomeState = HomeUiState(
     series = listOf(previewSeries("三体", 6), previewSeries("在暴雪时分", 8), previewSeries("长相思", 3)),
     lastSeriesTitle = "三体",
     cacheSizeText = "4.6 GB",
@@ -38,7 +38,7 @@ private val previewHomeState = HomeUiState(
     )
 )
 
-private val previewSearchState = SearchUiState(
+internal val previewSearchState = SearchUiState(
     history = listOf(SearchHistoryEntry("三体", 0L), SearchHistoryEntry("庆余年", 0L)),
     results = listOf(
         AggregatedVod(
@@ -48,7 +48,40 @@ private val previewSearchState = SearchUiState(
     )
 )
 
-private val previewSheetState = EpisodeSheetUiState(
+// 发现页首屏：有历史 + 推荐。
+internal val previewIntroState = SearchUiState(
+    history = listOf(SearchHistoryEntry("三体", 0L), SearchHistoryEntry("庆余年", 0L)),
+    recommendations = listOf(
+        AggregatedVod("三体", "", "2023", "大陆", "全26集",
+            hits = (1..3).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("三体")) }),
+        AggregatedVod("庆余年 第二季", "", "2024", "大陆", "更新至20集",
+            hits = (1..5).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("庆余年 第二季")) })
+    )
+)
+
+// 发现页空结果：结果区提示没搜到，下面仍有推荐。
+internal val previewNoResultState = SearchUiState(
+    results = emptyList(),
+    recommendations = listOf(
+        AggregatedVod("三体", "", "2023", "大陆", "全26集",
+            hits = (1..3).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("三体")) })
+    )
+)
+
+// 在线详情：两个源命中 + 长简介（能看到「展开」和渐隐遮罩）。
+internal val previewOnlineVod = AggregatedVod(
+    name = "庆余年 第二季", pic = "", year = "2024", area = "大陆", remarks = "更新至20集",
+    hits = listOf(
+        SourceHit(previewSource, VodItem("庆余年 第二季", vodYear = "2024", vodArea = "大陆", vodRemarks = "更新至20集")),
+        SourceHit(OnlineVideoSource("s2", "备用站", "http://s2.example.com"), VodItem("庆余年 第二季"))
+    ),
+    blurb = "范闲假死归京，接手鉴查院，在庆帝、陈萍萍与长公主之间周旋。" +
+        "本季围绕内库亏空与春闱舞弊展开，范闲既要查清母亲叶轻眉的死因，也要在朝堂与江湖之间" +
+        "保住身边人。剧集改编自猫腻同名小说，由张若昀、李沁主演，延续第一季的群像叙事与" +
+        "轻喜剧节奏，同时在权谋线上明显加压，几乎每一集都有新的势力重新洗牌。"
+)
+
+internal val previewSheetState = EpisodeSheetUiState(
     title = "三体",
     episodes = (1..12).map { index -> EpisodeLink(index, "第${index}集", "https://example.org/play/$index") },
     statuses = mapOf(
@@ -58,7 +91,7 @@ private val previewSheetState = EpisodeSheetUiState(
     )
 )
 
-private val previewDownloads = listOf(
+internal val previewDownloads = listOf(
     OfflineDownload(
         item = OfflineItem(id = "d1", title = "三体", url = "https://example.org/8.m3u8", episodeName = "第8集", episodeNumber = 8),
         state = DownloadTaskState.DOWNLOADING, downloadedBytes = 120L * 1024 * 1024,
@@ -76,7 +109,7 @@ private val previewDownloads = listOf(
     )
 )
 
-private val previewSourcesState = SourcesUiState(
+internal val previewSourcesState = SourcesUiState(
     rows = listOf(
         SourceRowUi(previewSource, healthy = true, healthText = "已启用 · 运行正常"),
         SourceRowUi(previewSource.copy(id = "p2", name = "冷却站", enabled = false), healthy = false, healthText = "已停用")
@@ -115,18 +148,9 @@ fun DiscoverScreenPreview() {
 @Preview(name = "发现 · 首屏推荐", showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun DiscoverIntroPreview() {
-    val state = SearchUiState(
-        history = listOf(SearchHistoryEntry("三体", 0L), SearchHistoryEntry("庆余年", 0L)),
-        recommendations = listOf(
-            AggregatedVod("三体", "", "2023", "大陆", "全26集",
-                hits = (1..3).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("三体")) }),
-            AggregatedVod("庆余年 第二季", "", "2024", "大陆", "更新至20集",
-                hits = (1..5).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("庆余年 第二季")) })
-        )
-    )
     AIPlayerTheme {
         SoftPage {
-            DiscoverScreen(state, query = "", onQuery = {}, onSearch = {},
+            DiscoverScreen(previewIntroState, query = "", onQuery = {}, onSearch = {},
                 onRemoveHistory = {}, onClearHistory = {}, onOpenResult = {}, onSources = {})
         }
     }
@@ -135,16 +159,9 @@ fun DiscoverIntroPreview() {
 @Preview(name = "发现 · 没搜到（下面仍有推荐）", showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun DiscoverNoResultPreview() {
-    val state = SearchUiState(
-        results = emptyList(),
-        recommendations = listOf(
-            AggregatedVod("三体", "", "2023", "大陆", "全26集",
-                hits = (1..3).map { SourceHit(OnlineVideoSource("s$it", "源$it", "http://s$it.example.com"), VodItem("三体")) })
-        )
-    )
     AIPlayerTheme {
         SoftPage {
-            DiscoverScreen(state, query = "一个没有的关键词", onQuery = {}, onSearch = {},
+            DiscoverScreen(previewNoResultState, query = "一个没有的关键词", onQuery = {}, onSearch = {},
                 onRemoveHistory = {}, onClearHistory = {}, onOpenResult = {}, onSources = {})
         }
     }

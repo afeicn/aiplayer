@@ -2,4 +2,6 @@
 <resources>
     <!-- 启动图标底色：logo 标记是紫色 3D 三角，配白底最干净。 -->
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- 启动窗口底色：与 UiTheme.kt 的 LightPalette.background 保持一致。 -->
+    <color name="window_background">#F5F5FD</color>
 </resources>

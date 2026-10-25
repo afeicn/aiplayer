@@ -68,7 +68,7 @@ fun ThemedSnackbar(data: SnackbarData, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(Ink.Violet))
+            Box(Modifier.size(7.dp).clip(CircleShape).background(palette.primary))
             Text(
                 data.visuals.message,
                 fontSize = 14.sp,
@@ -161,13 +161,15 @@ fun ToolbarButton(image: ImageVector, description: String, onClick: () -> Unit, 
             }
         }
         if (count > 0) {
+            val palette = MaterialTheme.colorScheme
             Box(
-                Modifier.align(Alignment.TopEnd).size(16.dp).background(Ink.Violet, CircleShape),
+                Modifier.align(Alignment.TopEnd).size(16.dp).background(palette.primary, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 // 数字要在圆圈正中：行高贴字号 + 去字体内边距，否则基线留白让数字看着偏上。
+                // 用 onPrimary 而非固定白色：深色主题主色是浅紫，白字会掉到 2:1。
                 Text(count.toString(),
-                    style = TextStyle(color = Color.White, fontSize = 9.sp, lineHeight = 9.sp,
+                    style = TextStyle(color = palette.onPrimary, fontSize = 9.sp, lineHeight = 9.sp,
                         fontWeight = FontWeight.Bold,
                         platformStyle = PlatformTextStyle(includeFontPadding = false))
                 )
@@ -302,7 +304,8 @@ fun SoftDialog(
                         TextButton(onClick = onDismissRequest) { Text(dismissText) }
                     }
                     TextButton(onClick = onConfirm, enabled = confirmEnabled) {
-                        Text(confirmText, color = MaterialTheme.colorScheme.primary)
+                        // 不写死颜色：TextButton 自己会给禁用态 38% onSurface，写死 primary 会让禁用钮看着可点。
+                        Text(confirmText)
                     }
                 }
             }
@@ -314,6 +317,7 @@ fun SoftDialog(
 @Composable
 fun HeroCard(label: String, title: String, subtitle: String, cover: String,
              onDetail: () -> Unit, onPlay: () -> Unit) {
+    val palette = MaterialTheme.colorScheme
     // 播放钮的呼吸光晕：2.6 秒一呼一吸，暗示「可以点」。
     val pulseTransition = rememberInfiniteTransition(label = "fab")
     val pulse by pulseTransition.animateFloat(
@@ -328,6 +332,7 @@ fun HeroCard(label: String, title: String, subtitle: String, cover: String,
         // 共享元素两端各自声明形状：卡片端 26dp 圆角、详情页直角，转场中连续插值。
         CoverImage(cover, "${title}海报",
             modifier = Modifier.fillMaxSize().posterSharedElement(posterKey(title)).clip(heroShape))
+        // 海报上的固定前景：底色是图片 + 固定深色羽化，不随深浅主题变化（两套主题下都是白字压深底）。
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color(0xD90C0C20)))))
         Column(
             Modifier.align(Alignment.BottomStart).padding(start = 20.dp, bottom = 22.dp, end = 88.dp)
@@ -344,7 +349,7 @@ fun HeroCard(label: String, title: String, subtitle: String, cover: String,
                 .scale(0.72f + 0.28f * pulse)
                 .background(
                     Brush.radialGradient(
-                        listOf(Ink.Violet.copy(alpha = 0.4f * (1f - pulse)), Color.Transparent)
+                        listOf(palette.primary.copy(alpha = 0.4f * (1f - pulse)), Color.Transparent)
                     ),
                     CircleShape
                 )
@@ -353,11 +358,12 @@ fun HeroCard(label: String, title: String, subtitle: String, cover: String,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 24.dp).size(56.dp)
                 .shadow(12.dp, CircleShape),
             shape = CircleShape,
-            color = Ink.Violet,
+            color = palette.primary,
             onClick = onPlay
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "直接续播", tint = Color.White, modifier = Modifier.size(31.dp))
+                Icon(Icons.Default.PlayArrow, contentDescription = "直接续播",
+                    tint = palette.onPrimary, modifier = Modifier.size(31.dp))
             }
         }
     }
@@ -437,7 +443,8 @@ fun PrimaryPill(text: String, icon: ImageVector? = null, onClick: () -> Unit, mo
         animationSpec = infiniteRepeatable(tween(2800), RepeatMode.Reverse),
         label = "breathe"
     )
-    val primary = MaterialTheme.colorScheme.primary
+    val palette = MaterialTheme.colorScheme
+    val primary = palette.primary
     // 按钮与高光层包进同一个 Box：否则高光层会变成外层 Row 的第二个子节点，
     // 它的 fillMaxWidth 把 weight 平分出来的按钮宽度抢光、按钮塌成 0 宽（详情页双胶囊实测踩坑）。
     Box(modifier) {
@@ -446,7 +453,12 @@ fun PrimaryPill(text: String, icon: ImageVector? = null, onClick: () -> Unit, mo
             modifier = Modifier.fillMaxWidth().height(44.dp), shape = CircleShape,
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (enabled) lerp(primary, Color.White, 0.16f * pulse) else primary
+                // 呼吸色向 onSurface 微调：浅色主题里变深、深色主题里变浅，两个方向都只会抬高文字对比度。
+                containerColor = if (enabled) lerp(primary, palette.onSurface, 0.10f * pulse) else primary,
+                // 显式给 onPrimary：底是动画插值色，contentColorFor() 匹配不到主色，会退回黑色/环境色。
+                contentColor = palette.onPrimary,
+                disabledContainerColor = palette.onSurface.copy(alpha = 0.12f),
+                disabledContentColor = palette.onSurface.copy(alpha = 0.38f)
             )
         ) {
             if (icon != null) {

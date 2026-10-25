@@ -202,13 +202,16 @@ private fun HomeSectionHeader(title: String, countLabel: String? = null) {
 }
 
 // ==================== 发现（跨源搜索） ====================
-/** 热搜榜名次配色：前三名给暖色，其余走中性色，深浅主题都不刺眼。 */
+/** 热搜榜名次配色：前三名给暖色，其余走中性色。暖色分深浅两套，保证压在半透明底上仍有 4.5:1。 */
 @Composable
-private fun hotRankColor(rank: Int): Color = when (rank) {
-    1 -> Color(0xFFE5484D)
-    2 -> Color(0xFFF76808)
-    3 -> Color(0xFFEBB11E)
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun hotRankColor(rank: Int): Color {
+    val app = LocalAppColors.current
+    return when (rank) {
+        1 -> app.rankFirst
+        2 -> app.rankSecond
+        3 -> app.rankThird
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 }
 
 @Composable
@@ -620,13 +623,14 @@ fun DetailScreen(
 /** 详情页「剧情简介」卡片：在线与离线详情页共用同一款（紫条标题 + 4 行折叠 + 展开/收起）。 */
 @Composable
 private fun BlurbCard(blurb: String, expanded: Boolean, onToggle: () -> Unit) {
+    val palette = MaterialTheme.colorScheme
     Surface(
         Modifier.fillMaxWidth(),
-        shape = cardShape, color = MaterialTheme.colorScheme.surfaceVariant
+        shape = cardShape, color = palette.surfaceVariant
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.width(4.dp).height(16.dp).clip(CircleShape).background(Ink.Violet))
+                Box(Modifier.width(4.dp).height(16.dp).clip(CircleShape).background(palette.primary))
                 Spacer(Modifier.width(8.dp))
                 Text("剧情简介", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
@@ -638,7 +642,7 @@ private fun BlurbCard(blurb: String, expanded: Boolean, onToggle: () -> Unit) {
             if (blurb.length > 120) {
                 TextButton(onClick = onToggle,
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
-                    Text(if (expanded) "收起" else "展开", fontSize = 13.sp, color = Ink.Violet)
+                    Text(if (expanded) "收起" else "展开", fontSize = 13.sp, color = palette.primary)
                 }
             }
         }
@@ -654,11 +658,13 @@ private fun DetailHeader(cover: String, title: String, onBack: () -> Unit) {
         // 返回时不会直角飞回、落地突然变圆。
         Box(Modifier.fillMaxSize().posterSharedElement(posterKey(title)).clip(RectangleShape)) {
             CoverImage(cover, "${title}剧集海报", modifier = Modifier.fillMaxSize())
+            // 海报上的固定遮罩：底部羽化到当前主题背景色，顶部深色压一层保证状态栏/返回钮可读。
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x4D091025), Color.Transparent, MaterialTheme.colorScheme.background))))
         }
+        // 返回钮压在任意海报上：固定白图标 + 加深到 45% 的黑底，保证在浅色海报上也 ≥3:1（非文字要求）。
         Surface(
             onClick = onBack,
-            color = Color.Black.copy(alpha = .35f), shape = CircleShape,
+            color = Color.Black.copy(alpha = .45f), shape = CircleShape,
             modifier = Modifier.statusBarsPadding().padding(start = 16.dp, top = 12.dp).size(44.dp)
         ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ArrowBack, "返回", tint = Color.White) } }
     }
@@ -831,7 +837,8 @@ private fun EpisodePageTabs(total: Int, page: Int, onSelect: (Int) -> Unit) {
                 motionTween(motionOn, Motion.TAB_SWITCH), label = "pageTabBg"
             )
             val tabFg by animateColorAsState(
-                if (current) Color.White else palette.onSurface,
+                // 选中页是 primary 实底：用 onPrimary 而不是固定白色，深色主题下才不会是浅紫底白字。
+                if (current) palette.onPrimary else palette.onSurface,
                 motionTween(motionOn, Motion.TAB_SWITCH), label = "pageTabFg"
             )
             Surface(
@@ -912,7 +919,8 @@ private fun EpisodeCell(
     )
     val cellContentColor by animateColorAsState(
         when {
-            selected || marked -> Color.White
+            // 选中/高亮格是 primary 实底，前景必须用 onPrimary（深色主题下主色是浅紫）。
+            selected || marked -> palette.onPrimary
             status == EpisodeGridStatus.DOWNLOADED -> palette.primary
             else -> palette.onSurface
         },
@@ -934,7 +942,8 @@ private fun EpisodeCell(
                     when (status) {
                         EpisodeGridStatus.DOWNLOADED -> Icon(Icons.Default.Check, "已下载",
                             modifier = Modifier.size(10.dp),
-                            tint = if (marked) Color.White else palette.primary)
+                            // 下载模式勾选后底色也是 primary，勾要是再用 primary 就看不见了。
+                            tint = if (selected || marked) palette.onPrimary else palette.primary)
                         EpisodeGridStatus.RESOLVING -> Text("⋯", fontSize = 9.sp, color = palette.onSurfaceVariant)
                         EpisodeGridStatus.ACTIVE -> Icon(Icons.Default.Download, "下载中",
                             modifier = Modifier.size(10.dp), tint = palette.onSurfaceVariant)
@@ -1034,7 +1043,7 @@ private fun LazyItemScope.DownloadRow(task: OfflineDownload, onPause: () -> Unit
     val title = OfflineLibrary.displayTitle(item.title, item.episodeName, item.episodeNumber, item.kind)
     val stateColor = when (task.state) {
         DownloadTaskState.FAILED -> palette.error
-        DownloadTaskState.COMPLETED -> Ink.Success
+        DownloadTaskState.COMPLETED -> LocalAppColors.current.success
         DownloadTaskState.DOWNLOADING -> palette.primary
         else -> palette.onSurfaceVariant
     }
@@ -1078,7 +1087,7 @@ private fun LazyItemScope.DownloadRow(task: OfflineDownload, onPause: () -> Unit
                 )
                 DownloadTaskState.COMPLETED -> LinearProgressIndicator(
                     progress = { 1f }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
-                    color = Ink.Success, trackColor = palette.surfaceVariant,
+                    color = LocalAppColors.current.success, trackColor = palette.surfaceVariant,
                     gapSize = 0.dp, drawStopIndicator = {}
                 )
                 else -> LinearProgressIndicator(
@@ -1575,7 +1584,7 @@ private fun LazyItemScope.SourceRow(
     val healthyNormal = row.healthy && row.healthText == "已启用 · 运行正常"
     val healthColor by animateColorAsState(
         when {
-            healthyNormal -> Ink.Success
+            healthyNormal -> LocalAppColors.current.success
             row.source.enabled && !row.healthy -> palette.error
             else -> palette.onSurfaceVariant
         },

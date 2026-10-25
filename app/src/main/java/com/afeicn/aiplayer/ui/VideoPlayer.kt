@@ -26,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -138,7 +137,7 @@ fun VideoPlayerScreen(
     val shownPosition = if (scrubbing) scrubPosition else position
     val sliderValue = if (duration > 0) shownPosition.toFloat() / duration else 0f
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(MediaOverlayColors.Canvas)) {
         AndroidView(
             factory = { viewContext ->
                 PlayerView(viewContext).apply {
@@ -332,7 +331,7 @@ fun VideoPlayerScreen(
         ) {
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color(0xA3000000), Color.Transparent, Color(0xBC000000)))
+                Brush.verticalGradient(MediaOverlayColors.ControlGradient)
             ))
             Row(
                 Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(horizontal = 25.dp, vertical = 15.dp),
@@ -341,24 +340,24 @@ fun VideoPlayerScreen(
             ) {
                 PlayerIcon(Icons.Default.ArrowBack, "返回", onBack)
                 Column(Modifier.weight(1f)) {
-                    Text(entry.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        maxLines = 1)
+                    Text(entry.name, color = MediaOverlayColors.TextPrimary, fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1)
                     if (entry.title.isNotBlank()) {
-                        Text(entry.title, color = Color.White.copy(alpha = .75f), fontSize = 12.sp, maxLines = 1)
+                        Text(entry.title, color = MediaOverlayColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
                     }
                 }
                 if (entry.offlineOnly) {
-                    Text("离线", fontSize = 10.sp, color = Color.White.copy(alpha = .65f))
+                    Text("离线", fontSize = 10.sp, color = MediaOverlayColors.TextSecondary)
                 }
                 Surface(
-                    color = Color.White.copy(alpha = .15f), shape = CircleShape,
+                    color = MediaOverlayColors.ButtonTint, shape = CircleShape,
                     onClick = {
                         speedIndex = (speedIndex + 1) % speeds.size
                         player.setPlaybackSpeed(speeds[speedIndex])
                     }
                 ) {
-                    Text("${speeds[speedIndex]}x".removeSuffix(".0"), color = Color.White, fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp))
+                    Text("${speeds[speedIndex]}x".removeSuffix(".0"), color = MediaOverlayColors.TextPrimary,
+                        fontSize = 12.sp, modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp))
                 }
             }
             Row(
@@ -368,7 +367,7 @@ fun VideoPlayerScreen(
                 PlayerIcon(Icons.Default.Replay10, "快退10秒",
                     { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0L)) }, 34.dp)
                 Surface(
-                    color = Color.Black.copy(alpha = .35f), shape = CircleShape, modifier = Modifier.size(74.dp),
+                    color = MediaOverlayColors.ControlCircle, shape = CircleShape, modifier = Modifier.size(74.dp),
                     onClick = { togglePlay() }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -376,7 +375,7 @@ fun VideoPlayerScreen(
                             animationSpec = tween(motionDuration(motionOn, Motion.ICON_STATE)),
                             label = "playPause") { isPlaying ->
                             Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "暂停或播放",
-                                tint = Color.White, modifier = Modifier.size(43.dp))
+                                tint = MediaOverlayColors.TextPrimary, modifier = Modifier.size(43.dp))
                         }
                     }
                 }
@@ -388,7 +387,7 @@ fun VideoPlayerScreen(
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatTime(shownPosition), color = Color.White, fontSize = 12.sp)
+                    Text(formatTime(shownPosition), color = MediaOverlayColors.TextPrimary, fontSize = 12.sp)
                     Slider(
                         value = sliderValue,
                         onValueChange = {
@@ -402,11 +401,12 @@ fun VideoPlayerScreen(
                         },
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp).height(32.dp),
                         colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFFBB9AFE), activeTrackColor = Color(0xFFBB9AFE),
-                            inactiveTrackColor = Color.White.copy(alpha = .45f)
+                            thumbColor = MediaOverlayColors.Accent,
+                            activeTrackColor = MediaOverlayColors.Accent,
+                            inactiveTrackColor = MediaOverlayColors.TrackInactive
                         )
                     )
-                    Text(formatTime(duration), color = Color.White, fontSize = 12.sp)
+                    Text(formatTime(duration), color = MediaOverlayColors.TextPrimary, fontSize = 12.sp)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     PlayerAction(Icons.Default.SkipPrevious, "上一集", enabled = hasPrev, onClick = onPrev)
@@ -428,11 +428,11 @@ fun VideoPlayerScreen(
         // ==================== 手势浮层（无点击处理，不拦截触摸） ====================
         speedOverlay?.let { speed ->
             Surface(
-                color = Color.Black.copy(alpha = .52f), shape = RoundedCornerShape(18.dp),
+                color = MediaOverlayColors.Scrim, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 72.dp, end = 16.dp)
             ) {
                 Text(
-                    "${speed}x", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    "${speed}x", color = MediaOverlayColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                 )
             }
@@ -440,7 +440,7 @@ fun VideoPlayerScreen(
         seekPreview?.let { preview ->
             val delta = preview.targetMs - preview.startMs
             Surface(
-                color = Color.Black.copy(alpha = .56f), shape = RoundedCornerShape(18.dp),
+                color = MediaOverlayColors.Scrim, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.align(Alignment.Center)
             ) {
                 Column(
@@ -449,7 +449,7 @@ fun VideoPlayerScreen(
                 ) {
                     Text(
                         "${formatTime(preview.targetMs)} / ${formatTime(preview.durationMs)}",
-                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold
+                        color = MediaOverlayColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold
                     )
                     Text(
                         when {
@@ -457,18 +457,18 @@ fun VideoPlayerScreen(
                             delta < 0L -> "快退 -${formatTime(-delta)}"
                             else -> "当前位置"
                         },
-                        color = Color.White.copy(alpha = .76f), fontSize = 12.sp
+                        color = MediaOverlayColors.TextSecondary, fontSize = 12.sp
                     )
                 }
             }
         }
         gestureHint?.let { hint ->
             Surface(
-                color = Color.Black.copy(alpha = .52f), shape = RoundedCornerShape(18.dp),
+                color = MediaOverlayColors.Scrim, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.align(Alignment.Center)
             ) {
                 Text(
-                    hint, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    hint, color = MediaOverlayColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
             }
@@ -476,7 +476,7 @@ fun VideoPlayerScreen(
         levelOverlay?.let { level ->
             val isVolume = level.side == PlayerGestureRules.Side.VOLUME
             Surface(
-                color = Color.Black.copy(alpha = .52f), shape = RoundedCornerShape(18.dp),
+                color = MediaOverlayColors.Scrim, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .align(if (isVolume) Alignment.CenterEnd else Alignment.CenterStart)
                     .padding(horizontal = 24.dp)
@@ -485,18 +485,20 @@ fun VideoPlayerScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             if (isVolume) Icons.Default.VolumeUp else Icons.Default.Brightness6,
-                            null, tint = Color.White, modifier = Modifier.size(18.dp)
+                            null, tint = MediaOverlayColors.TextPrimary, modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text(if (isVolume) "音量" else "亮度", color = Color.White, fontSize = 13.sp)
+                        Text(if (isVolume) "音量" else "亮度",
+                            color = MediaOverlayColors.TextPrimary, fontSize = 13.sp)
                         Spacer(Modifier.weight(1f))
-                        Text("${(level.level * 100).roundToInt()}%", color = Color.White, fontSize = 13.sp)
+                        Text("${(level.level * 100).roundToInt()}%",
+                            color = MediaOverlayColors.TextPrimary, fontSize = 13.sp)
                     }
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { level.level },
                         modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
-                        color = Color(0xFFBB9AFE), trackColor = Color.White.copy(alpha = .3f),
+                        color = MediaOverlayColors.Accent, trackColor = MediaOverlayColors.TrackOnScrim,
                         gapSize = 0.dp, drawStopIndicator = {}
                     )
                 }
@@ -574,7 +576,8 @@ private fun formatTime(ms: Long): String {
 @Composable
 private fun PlayerIcon(image: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 24.dp) {
     IconButton(onClick = onClick, modifier = Modifier.size(43.dp)) {
-        Icon(image, contentDescription = label, tint = Color.White, modifier = Modifier.size(size))
+        Icon(image, contentDescription = label, tint = MediaOverlayColors.TextPrimary,
+            modifier = Modifier.size(size))
     }
 }
 
@@ -585,7 +588,7 @@ private fun PlayerAction(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    val tint = if (enabled) Color.White else Color.White.copy(alpha = .35f)
+    val tint = if (enabled) MediaOverlayColors.TextPrimary else MediaOverlayColors.Disabled
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.clip(RoundedCornerShape(15.dp))

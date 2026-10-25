@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅 debug 变体：截图画廊，用来在没有离线数据的新模拟器上逐页检查主题。 -->
+    <application>
+        <activity
+            android:name=".ui.PreviewGalleryActivity"
+            android:exported="true"
+            android:label="UI 截图画廊"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+    </application>
+</manifest>
