@@ -162,9 +162,14 @@ class EpisodeSheetViewModel : ViewModel() {
     /** 详情页模式：抓集数与占位解析都要源与详情页地址。 */
     private var pageSource: OnlineVideoSource? = null
     private var pageDetailUrl: String = ""
+    /** 这部剧的海报 URL（搜索结果或详情页提取）：下载记录落库时带上，「已下载」卡才有图。 */
+    private var sheetCover: String = ""
 
     /** 在线搜索结果卡：有线路走直链，否则抓第一个详情页。 */
     fun load(vod: AggregatedVod) {
+        sheetCover = vod.pic
+        if (vod.pic.isNotBlank())
+            OfflineDownloadManager.backfillCover(AppContainer.appContext, vod.name, vod.pic)
         val hit = vod.hits.firstOrNull { it.item.playGroups.isNotEmpty() }
         if (hit != null) {
             val group = hit.item.playGroups.first()
@@ -190,6 +195,7 @@ class EpisodeSheetViewModel : ViewModel() {
 
     /** 离线剧「继续下载」：先定位详情页（老数据按剧名+站点兜底搜索），再抓集数。 */
     fun loadForSeries(series: DownloadedSeries) {
+        sheetCover = series.cover
         val target = ContinueDownloadRules.targetOf(series)
         if (target == null) {
             _state.value = EpisodeSheetUiState(title = series.title, error = ContinueDownloadRules.NO_SOURCE)
@@ -256,6 +262,18 @@ class EpisodeSheetViewModel : ViewModel() {
                             resumeEpisode = AppContainer.playbackProgress.lastEpisodeOf(title),
                             notice = if (aiAssisted) "AI 智能解析出的集数，个别集可能不准" else null
                         )
+                        // 详情页顺带提取主海报：给下载记录与「最近浏览」补图（部分源搜索结果本身没图）。
+                        if (sheetCover.isBlank()) {
+                            val poster = runCatching {
+                                withContext(Dispatchers.IO) {
+                                    SubscriptionPipeline.fetchPoster(detailUrl, source.referer.takeIf { it.isNotBlank() })
+                                }
+                            }.getOrDefault("")
+                            if (poster.isNotBlank()) {
+                                sheetCover = poster
+                                OfflineDownloadManager.backfillCover(AppContainer.appContext, title, poster)
+                            }
+                        }
                     }
                 },
                 onFailure = { e ->
@@ -307,7 +325,7 @@ class EpisodeSheetViewModel : ViewModel() {
                 val episode = EpisodeLink(index, line.name, line.url)
                 val item = SubscriptionPipeline.offlineItemForEpisode(
                     title, source, episode, onlineStream(source, line, title),
-                    totalEpisodes = directLines.size
+                    totalEpisodes = directLines.size, cover = sheetCover
                 )
                 when (OfflineDownloadManager.enqueue(AppContainer.appContext, item)) {
                     EnqueueResult.STARTED, EnqueueResult.WAITING_NETWORK -> started++
@@ -324,7 +342,7 @@ class EpisodeSheetViewModel : ViewModel() {
         }
         val page = pageSource ?: return
         val count = SubscriptionPipeline.enqueueRangeResolving(
-            AppContainer.appContext, title, page, pageDetailUrl, partition.addable.sorted()
+            AppContainer.appContext, title, page, pageDetailUrl, partition.addable.sorted(), cover = sheetCover
         )
         _state.value = _state.value.copy(
             notice = "已提交 $count 集，正在获取下载地址" +
@@ -410,7 +428,29 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private var pollJob: Job? = null
 
-    init { publish() }
+    init {
+        publish()
+        backfillMissingCovers()
+    }
+
+    /** 老下载记录的海报自愈：cover 为空但存了详情页地址的，后台抓海报回填（每次启动最多 5 部）。 */
+    private fun backfillMissingCovers() {
+        viewModelScope.launch {
+            val targets = _state.value.series
+                .filter { it.cover.isBlank() && (it.sourceItem?.detailUrl?.isNotBlank() == true) }
+                .take(5)
+            for (series in targets) {
+                val detailUrl = series.sourceItem?.detailUrl?.trim().orEmpty()
+                val poster = runCatching {
+                    withContext(Dispatchers.IO) { SubscriptionPipeline.fetchPoster(detailUrl) }
+                }.getOrNull().orEmpty()
+                if (poster.isNotBlank()) {
+                    OfflineDownloadManager.backfillCover(AppContainer.appContext, series.title, poster)
+                    publish()
+                }
+            }
+        }
+    }
 
     /** 下载进度轮询：800ms 刷一次 DownloadManager 快照（进度条、状态角标都靠它推进）。 */
     fun startPolling() {

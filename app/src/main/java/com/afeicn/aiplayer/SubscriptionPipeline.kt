@@ -31,6 +31,13 @@ object SubscriptionPipeline {
         return EpisodeListParser.extract(page.body, page.url)
     }
 
+    /** 抓详情页取主海报 URL（下载记录/最近浏览的海报回填用）；失败或没有返回空串。 */
+    fun fetchPoster(detailUrl: String, referer: String? = null, fetcher: PageFetcher = HttpPageFetcher()): String =
+        runCatching {
+            val page = fetcher.fetch(detailUrl, referer)
+            PosterFinder.find(page.body, page.url)
+        }.getOrDefault("")
+
     /**
      * 抓详情页取集数，确定性解析为空时走 AI 兜底（[ai] 非空才启用）。返回 (集数, 是否 AI 辅助)。
      * AI 产出的播放页地址逐条回连校验（GET 存活，上限 50 条），死链丢弃；
@@ -76,7 +83,8 @@ object SubscriptionPipeline {
         episode: EpisodeLink,
         stream: NetworkStream,
         totalEpisodes: Int = 0,
-        detailUrl: String = ""
+        detailUrl: String = "",
+        cover: String = ""
     ): OfflineItem =
         OfflineItem(
             id = "",
@@ -84,7 +92,7 @@ object SubscriptionPipeline {
             title = MediaTitle.clean(dramaTitle),
             url = stream.url,
             headers = stream.headers,
-            cover = "",
+            cover = cover,
             extension = stream.extension.ifBlank { stream.url.substringBefore('?').substringAfterLast('.', "").lowercase() },
             sourceName = source.name,
             episodeName = episode.name,
@@ -101,7 +109,8 @@ object SubscriptionPipeline {
         index: Int,
         audioUrl: String,
         totalEpisodes: Int = 0,
-        detailUrl: String = ""
+        detailUrl: String = "",
+        cover: String = ""
     ): OfflineItem =
         OfflineItem(
             id = "",
@@ -109,7 +118,7 @@ object SubscriptionPipeline {
             title = MediaTitle.clean(dramaTitle),
             url = audioUrl,
             headers = source.headers,
-            cover = "",
+            cover = cover,
             extension = AudioDirectLink.audioExtension(audioUrl).orEmpty(),
             sourceName = source.name,
             episodeName = "音频$index",
@@ -133,12 +142,15 @@ object SubscriptionPipeline {
                 links.getOrNull(index - 1)?.let { offlineItemForAudio(dramaTitle, source, index, it, totalEpisodes = links.size, detailUrl = detailUrl) }
             }
         } else {
-            val episodes = fetchEpisodes(detailUrl, fetcher)
+            // 详情页只抓一次：集数与海报从同一份 HTML 解析，海报随下载记录落库。
+            val page = runCatching { fetcher.fetch(detailUrl, null) }.getOrNull()
+            val episodes = page?.let { EpisodeListParser.extract(it.body, it.url) }.orEmpty()
+            val poster = page?.let { PosterFinder.find(it.body, it.url) }.orEmpty()
             val byIndex = episodes.associateBy { it.index }
             indices.mapNotNull { index ->
                 val episode = byIndex[index] ?: return@mapNotNull null
                 val stream = resolveStream(episode.url, fetcher) ?: return@mapNotNull null
-                offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl)
+                offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster)
             }
         }
     }
@@ -157,12 +169,13 @@ object SubscriptionPipeline {
     }
 
     /** 为某集构造「获取地址中」占位记录：url 尚未解析，靠 [OfflineItem.resolveDetailUrl] + [OfflineItem.resolveIndex] 定位与重试。 */
-    fun resolvingPlaceholder(dramaTitle: String, source: OnlineVideoSource, detailUrl: String, index: Int): OfflineItem =
+    fun resolvingPlaceholder(dramaTitle: String, source: OnlineVideoSource, detailUrl: String, index: Int, cover: String = ""): OfflineItem =
         OfflineItem(
             id = OfflineDownloadRules.downloadIdFor("resolve:$detailUrl#$index"),
             title = MediaTitle.clean(dramaTitle),
             url = "",
             headers = source.headers,
+            cover = cover,
             sourceName = source.name,
             episodeName = "第${index}集",
             kind = if (source.type == SourceType.AUDIO) MediaKind.AUDIO else MediaKind.VIDEO,
@@ -182,13 +195,14 @@ object SubscriptionPipeline {
         source: OnlineVideoSource,
         detailUrl: String,
         indices: List<Int>,
+        cover: String = "",
         fetcher: PageFetcher = HttpPageFetcher()
     ): Int {
         if (indices.isEmpty()) return 0
-        val placeholders = indices.map { resolvingPlaceholder(dramaTitle, source, detailUrl, it) }
+        val placeholders = indices.map { resolvingPlaceholder(dramaTitle, source, detailUrl, it, cover) }
         OfflineDownloadManager.registerResolving(context, placeholders)
         pipelineScope.launch {
-            resolveAndPromote(context, dramaTitle, source, detailUrl, indices, fetcher)
+            resolveAndPromote(context, dramaTitle, source, detailUrl, indices, cover, fetcher)
         }
         return placeholders.size
     }
@@ -202,7 +216,7 @@ object SubscriptionPipeline {
         val source = sourceFor(item)
         OfflineDownloadManager.registerResolving(context, listOf(item))
         pipelineScope.launch {
-            resolveAndPromote(context, item.title, source, item.resolveDetailUrl, listOf(item.resolveIndex))
+            resolveAndPromote(context, item.title, source, item.resolveDetailUrl, listOf(item.resolveIndex), item.cover)
         }
     }
 
@@ -213,38 +227,42 @@ object SubscriptionPipeline {
         source: OnlineVideoSource,
         detailUrl: String,
         indices: List<Int>,
+        cover: String = "",
         fetcher: PageFetcher = HttpPageFetcher()
     ) = withContext(Dispatchers.IO) {
         if (indices.isEmpty()) return@withContext
         if (source.type == SourceType.AUDIO) {
             val links = fetchAudioLinks(detailUrl, fetcher)
             for (index in indices) {
-                val placeholderId = resolvingPlaceholder(dramaTitle, source, detailUrl, index).id
+                val placeholderId = resolvingPlaceholder(dramaTitle, source, detailUrl, index, cover).id
                 val audioUrl = links.getOrNull(index - 1)
                 if (audioUrl != null) {
                     OfflineDownloadManager.promoteResolved(
                         context, placeholderId,
-                        offlineItemForAudio(dramaTitle, source, index, audioUrl, totalEpisodes = links.size, detailUrl = detailUrl)
+                        offlineItemForAudio(dramaTitle, source, index, audioUrl, totalEpisodes = links.size, detailUrl = detailUrl, cover = cover)
                     )
                 } else {
                     OfflineDownloadManager.failResolving(placeholderId)
                 }
             }
         } else {
-            val episodes = fetchEpisodes(detailUrl, fetcher)
+            // 详情页只抓一次：集数与海报同源解析，海报随真实地址一起转正落库。
+            val page = runCatching { fetcher.fetch(detailUrl, source.referer.takeIf { it.isNotBlank() }) }.getOrNull()
+            val episodes = page?.let { EpisodeListParser.extract(it.body, it.url) }.orEmpty()
+            val poster = cover.ifBlank { page?.let { PosterFinder.find(it.body, it.url) }.orEmpty() }
             val byIndex = episodes.associateBy { it.index }
             val semaphore = Semaphore(EpisodeBatchDownloader.DEFAULT_CONCURRENCY.coerceAtLeast(1))
             coroutineScope {
                 indices.forEach { index ->
                     launch {
                         semaphore.withPermit {
-                            val placeholderId = resolvingPlaceholder(dramaTitle, source, detailUrl, index).id
+                            val placeholderId = resolvingPlaceholder(dramaTitle, source, detailUrl, index, cover).id
                             val episode = byIndex[index]
                             val stream = episode?.let { resolveStream(it.url, fetcher) }
                             if (episode != null && stream != null) {
                                 OfflineDownloadManager.promoteResolved(
                                     context, placeholderId,
-                                    offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl)
+                                    offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster)
                                 )
                             } else {
                                 OfflineDownloadManager.failResolving(placeholderId)

@@ -79,6 +79,11 @@ object OfflineDownloadRules {
     fun findDuplicateId(existingIds: Set<String>, url: String): String? =
         downloadIdFor(url).takeIf { it in existingIds }
 
+    /** 海报回填：只给同名且海报为空的条目补上，已有海报不覆盖。 */
+    fun patchCover(item: OfflineItem, title: String, cover: String): OfflineItem =
+        if (cover.isNotBlank() && item.cover.isBlank() && OfflineLibrary.sameTitle(item.title, title))
+            item.copy(cover = cover) else item
+
     /** Media3 [Download] 状态 + 停因 → 本地 UI 状态。 */
     fun mapState(state: Int, stopReason: Int = Download.STOP_REASON_NONE): DownloadTaskState = when (state) {
         Download.STATE_QUEUED -> DownloadTaskState.QUEUED

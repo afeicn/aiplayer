@@ -329,4 +329,21 @@ class OfflineDownloadRulesTest {
         assertEquals("1.0 KB", OfflineDownloadRules.formatBytes(1024L))
         assertEquals("1.5 MB", OfflineDownloadRules.formatBytes((1.5 * 1024 * 1024).toLong()))
     }
+
+    // ==================== 海报回填 ====================
+
+    @Test
+    fun patchCoverOnlyFillsBlankSameTitle() {
+        val blank = OfflineItem(id = "1", title = "我不是大师", url = "http://a/1.m3u8")
+        val patched = OfflineDownloadRules.patchCover(blank, "我不是大师", "http://c/p.jpg")
+        assertEquals("http://c/p.jpg", patched.cover)
+        // 已有海报不覆盖。
+        val filled = blank.copy(cover = "http://c/old.jpg")
+        assertEquals("http://c/old.jpg", OfflineDownloadRules.patchCover(filled, "我不是大师", "http://c/new.jpg").cover)
+        // 不同名不动。
+        val other = OfflineItem(id = "2", title = "庆余年", url = "http://a/2.m3u8")
+        assertEquals("", OfflineDownloadRules.patchCover(other, "我不是大师", "http://c/p.jpg").cover)
+        // 空海报不写。
+        assertEquals("", OfflineDownloadRules.patchCover(blank, "我不是大师", "").cover)
+    }
 }

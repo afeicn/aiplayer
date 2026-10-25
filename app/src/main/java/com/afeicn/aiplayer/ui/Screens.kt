@@ -100,7 +100,8 @@ fun HomeScreen(
                         title = hero.title,
                         subtitle = heroSeries?.countLabel
                             ?: if (hero.lastEpisode > 0) "上次看到第 ${hero.lastEpisode} 集" else "最近播放",
-                        cover = hero.cover,
+                        // 最近浏览里海报为空（老记录没存图）时退回下载记录里的海报。
+                        cover = hero.cover.ifBlank { heroSeries?.cover.orEmpty() },
                         onDetail = { heroSeries?.let(onOpenSeries) ?: onOpenRecent(hero) },
                         onPlay = { heroSeries?.let(onPlay) ?: onPlayRecent(hero) }
                     )

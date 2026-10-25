@@ -36,6 +36,19 @@ class RecentPlayLogTest {
     }
 
     @Test
+    fun emptyCoverKeepsEarlierCover() {
+        // 部分源搜索结果没海报：新记录 cover 为空时保留旧海报，不越记越空。
+        val withCover = listOf(RecentPlay("我不是大师", "http://c/poster.jpg", 100, ""))
+        val merged = RecentPlayLog.merge(withCover, RecentPlay("我不是大师", "", 300, "http://p/1"))
+        assertEquals(1, merged.size)
+        assertEquals("http://c/poster.jpg", merged.first().cover)
+        assertEquals("http://p/1", merged.first().playUrl)
+        // 新记录带海报则正常覆盖。
+        val replaced = RecentPlayLog.merge(withCover, RecentPlay("我不是大师", "http://c/new.jpg", 300))
+        assertEquals("http://c/new.jpg", replaced.first().cover)
+    }
+
+    @Test
     fun mergeCapsAtMaxAndIgnoresBlankTitle() {
         val seed = (1..15).map { play("剧$it", it.toLong()) }
         var list = emptyList<RecentPlay>()

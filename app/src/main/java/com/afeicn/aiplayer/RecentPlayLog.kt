@@ -26,12 +26,16 @@ object RecentPlayLog {
     /**
      * 新记录置顶；同名（清洗后）旧记录剔除；超过 [max] 截尾。
      * 再浏览（playUrl 为空）不冲掉旧的续播地址：浏览只更新时间，播放才带地址。
+     * 海报同理：新记录海报为空（部分源搜索结果没图）时保留旧海报，不越记越空。
      */
     fun merge(existing: List<RecentPlay>, entry: RecentPlay, max: Int = MAX): List<RecentPlay> {
         if (entry.title.isBlank()) return existing
         val previous = existing.firstOrNull { OfflineLibrary.sameTitle(it.title, entry.title) }
-        val kept = if (entry.playUrl.isBlank() && previous != null)
-            entry.copy(playUrl = previous.playUrl) else entry
+        var kept = entry
+        if (previous != null) {
+            if (kept.playUrl.isBlank()) kept = kept.copy(playUrl = previous.playUrl)
+            if (kept.cover.isBlank()) kept = kept.copy(cover = previous.cover)
+        }
         val fresh = listOf(kept) + existing.filter { !OfflineLibrary.sameTitle(it.title, entry.title) }
         return fresh.take(max.coerceAtLeast(1))
     }

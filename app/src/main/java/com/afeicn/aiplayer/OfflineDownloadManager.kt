@@ -284,6 +284,15 @@ object OfflineDownloadManager {
         refresh()
     }
 
+    /** 海报回填：详情页/搜索结果拿到海报 URL 后，补进这部剧所有海报为空的下载记录。 */
+    fun backfillCover(context: Context, title: String, cover: String) {
+        if (cover.isBlank()) return
+        ensureInitialized(context)
+        val localStore = store ?: return
+        localStore.updateAll { item -> OfflineDownloadRules.patchCover(item, title, cover) }
+        refresh()
+    }
+
     /** 缓存占用（直接统计缓存目录文件大小，含在线播放顺手写入的缓存分片）。 */
     fun cacheSpaceBytes(context: Context): Long {
         val dir = File(context.applicationContext.filesDir, "downloads")
