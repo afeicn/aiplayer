@@ -204,6 +204,10 @@ class MediaTitleTest {
         val keys2 = MediaTitle.searchKeys("三体[全集] 1080P")
         assertTrue(keys2.contains("三体"))
         assertTrue(keys2.contains("三体[全集]"))
+        // 空格后段也进候选：「斗罗大陆剧场版 剑道尘心」里「剑道尘心」常才是源上的主标题。
+        val keys3 = MediaTitle.searchKeys("斗罗大陆剧场版 剑道尘心")
+        assertTrue(keys3.contains("斗罗大陆剧场版"))
+        assertTrue(keys3.contains("剑道尘心"))
         // 空标题没有候选。
         assertTrue(MediaTitle.searchKeys("  ").isEmpty())
     }

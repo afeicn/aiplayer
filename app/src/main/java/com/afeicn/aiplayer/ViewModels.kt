@@ -30,6 +30,8 @@ data class SearchUiState(
     val noEnabledSources: Boolean = false,
     /** 本次结果里是否有源走了 AI 兜底解析。 */
     val aiAssisted: Boolean = false,
+    /** 搜索降级说明：结果不是关键词直接搜出来的时，告诉用户这些结果是怎么来的。 */
+    val searchNote: String? = null,
     val error: String? = null,
     /** 发现页无关键词时的推荐流：真跑跨源搜索得到，不是内置假数据。 */
     val recommendations: List<AggregatedVod> = emptyList(),
@@ -55,29 +57,61 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         if (enabled == 0) {
             _state.value = _state.value.copy(
                 searching = false, results = emptyList(), history = history,
-                noEnabledSources = true, error = null
+                noEnabledSources = true, error = null, searchNote = null
             )
             return
         }
-        _state.value = _state.value.copy(searching = true, history = history, error = null, noEnabledSources = false)
+        _state.value = _state.value.copy(
+            searching = true, history = history, error = null,
+            noEnabledSources = false, searchNote = null
+        )
         viewModelScope.launch {
             val fallback = AppContainer.aiSearchFallbackOrNull()
             val report = runCatching { withContext(Dispatchers.IO) { AppContainer.searchEngine.search(keyword, aiFallback = fallback) } }
             report.fold(
                 onSuccess = { result ->
-                    val cards = VodAggregator.aggregate(result.hits)
+                    var cards = VodAggregator.aggregate(result.hits)
+                    var failed = result.outcomes.count { !it.success }
+                    var aiAssisted = result.outcomes.any { it.aiAssisted }
+                    var note: String? = null
+                    if (cards.isEmpty()) {
+                        // 降级①：推荐流本身就是短关键词真实跨源搜索的聚合结果，
+                        // 「斗罗大陆剧场版 剑道尘心」这类全名源上搜不到、推荐里却往往就有，
+                        // 先本地匹配，零网络。
+                        val local = RecommendationRules.matchByTitle(_state.value.recommendations, keyword)
+                        if (local.isNotEmpty()) {
+                            cards = local
+                            note = "「$keyword」没直接搜到，为你推荐里有同名作品"
+                        } else {
+                            // 降级②：换更短的候选关键词逐个重搜（剥标记、取空格分段）。
+                            for (key in MediaTitle.searchKeys(keyword).drop(1)) {
+                                val retry = runCatching {
+                                    withContext(Dispatchers.IO) { AppContainer.searchEngine.search(key, aiFallback = fallback) }
+                                }.getOrNull() ?: continue
+                                failed = retry.outcomes.count { !it.success }
+                                aiAssisted = retry.outcomes.any { it.aiAssisted }
+                                val retryCards = VodAggregator.aggregate(retry.hits)
+                                if (retryCards.isNotEmpty()) {
+                                    cards = retryCards
+                                    note = "「$keyword」没直接搜到，按「$key」搜到这些"
+                                    break
+                                }
+                            }
+                        }
+                    }
                     _state.value = _state.value.copy(
                         searching = false,
                         results = cards,
-                        failedSources = result.outcomes.count { !it.success },
-                        aiAssisted = result.outcomes.any { it.aiAssisted },
+                        failedSources = failed,
+                        aiAssisted = aiAssisted,
+                        searchNote = note,
                         error = null
                     )
                 },
                 onFailure = { e ->
                     _state.value = _state.value.copy(
                         searching = false, results = emptyList(),
-                        error = "搜索失败：${e.message ?: "未知错误"}"
+                        error = "搜索失败：${e.message ?: "未知错误"}", searchNote = null
                     )
                 }
             )

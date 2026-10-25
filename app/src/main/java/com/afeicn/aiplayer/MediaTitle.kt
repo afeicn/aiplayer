@@ -86,7 +86,10 @@ object MediaTitle {
             TAIL_TAG.replace(base, "").trim(),
             TAIL_TAG.replace(trunk, "").trim(),
             base.substringBefore(' ').trim(),
-            trunk.substringBefore(' ').trim()
+            trunk.substringBefore(' ').trim(),
+            // 空格后段：「斗罗大陆剧场版 剑道尘心」里「剑道尘心」常才是源上的主标题。
+            base.substringAfterLast(' ').trim(),
+            trunk.substringAfterLast(' ').trim()
         ).filter { it.isNotBlank() }.distinct()
     }
 

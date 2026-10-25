@@ -409,6 +409,13 @@ fun DiscoverScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
+                state.searchNote?.let { note ->
+                    if (state.results.isNotEmpty()) {
+                        item {
+                            Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        }
+                    }
+                }
                 if (!state.searching && state.results.isEmpty() && state.error == null && !state.noEnabledSources) {
                     item {
                         Column(Modifier.fillMaxWidth().padding(top = 24.dp),

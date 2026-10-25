@@ -56,4 +56,25 @@ object RecommendationRules {
             )
             .take(limit)
     }
+
+    /**
+     * 搜索落空时的本地匹配：在已加载的推荐流里找这部剧。
+     * 推荐流本身就是短关键词真实跨源搜索的聚合结果，卡片带真封面、详情页地址与来源信息，
+     * 命中就能直接当搜索结果用，零网络请求——「斗罗大陆剧场版 剑道尘心」这类全名
+     * 在源站搜不到，但推荐里往往就有。
+     * 先按同名（剥「[第一季全]」等标记、忽略空白）；不中就要求关键词的每个空格分段
+     * （长度 ≥2）都出现在卡片标题里。
+     */
+    fun matchByTitle(recommendations: List<AggregatedVod>, keyword: String): List<AggregatedVod> {
+        val kw = MediaTitle.clean(keyword)
+        if (kw.isBlank() || recommendations.isEmpty()) return emptyList()
+        val exact = recommendations.filter { OfflineLibrary.sameTitle(it.name, kw) }
+        if (exact.isNotEmpty()) return exact
+        val tokens = kw.split(' ').map { MediaTitle.normalize(it) }.filter { it.length >= 2 }
+        if (tokens.isEmpty()) return emptyList()
+        return recommendations.filter { card ->
+            val name = MediaTitle.normalize(card.name)
+            tokens.all { name.contains(it) }
+        }
+    }
 }
