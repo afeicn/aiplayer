@@ -32,12 +32,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.afeicn.aiplayer.AcceleratedSeek
 import com.afeicn.aiplayer.MediaEntry
+import com.afeicn.aiplayer.MediaKind
 import com.afeicn.aiplayer.PlayerEngine
 import com.afeicn.aiplayer.PlayerGestureRules
 import kotlinx.coroutines.delay
@@ -129,6 +133,38 @@ fun VideoPlayerScreen(
             // 否则返回后视频在后台继续出声。先存后停，stop 会把位置清零。
             onSaveProgress()
             player.stop()
+        }
+    }
+    // 常亮与亮度恢复成对处理：视频播放页在前台就常亮（暂停也常亮，方便看画面找东西），
+    // 音频不常亮（听书/听歌一般锁屏后台听）。视频播完/停止后也及时清除，避免停在尾帧常亮。
+    // 页面不可见（ON_PAUSE/ON_STOP）立即清除 flag，离开播放页时再清一次并恢复系统亮度。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, activity, player, entry.kind) {
+        val window = activity?.window
+        fun syncKeepScreenOn() {
+            val keep = entry.kind == MediaKind.VIDEO &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                player.playbackState != Player.STATE_IDLE &&
+                player.playbackState != Player.STATE_ENDED
+            if (keep) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME, Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> syncKeepScreenOn()
+                else -> Unit
+            }
+        }
+        val playerListener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) = syncKeepScreenOn()
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        player.addListener(playerListener)
+        syncKeepScreenOn()
+        onDispose {
+            player.removeListener(playerListener)
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             // 手势调过的亮度只作用于播放窗口，退出播放页恢复系统亮度。
             restoreSystemBrightness(activity)
         }

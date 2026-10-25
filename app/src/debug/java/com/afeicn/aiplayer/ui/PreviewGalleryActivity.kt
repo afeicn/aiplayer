@@ -70,12 +70,14 @@ class PreviewGalleryActivity : ComponentActivity() {
         }
         if (screen == "player-queue") {
             val start = intent.getIntExtra("start", 0)
+            // 音频用于验证「听音频不该常亮」：同一播放页只换 MediaKind，其余链路不变。
+            val kind = if (intent.getBooleanExtra("audio", false)) MediaKind.AUDIO else MediaKind.VIDEO
             // 与 MainActivity.openPlayer 的离线剧分支一致：播过就进「最近浏览」，
             // 这样杀进程重进后，首页大卡/最近列表才有可核对的条目。
             AppContainer.playbackProgress.recordPlay(
                 "队列测试", "", "", System.currentTimeMillis()
             )
-            playerVm.playQueue(demoQueue(), startIndex = start)
+            playerVm.playQueue(demoQueue(kind), startIndex = start)
         }
         if (screen == "sheet-real") {
             sheetVm.load(demoProgressVod())
@@ -88,11 +90,11 @@ class PreviewGalleryActivity : ComponentActivity() {
     }
 
     /** 三条同源但标题不同的队列，仅用于验证切集后的按钮/标题是否刷新。 */
-    private fun demoQueue(): List<MediaEntry> {
+    private fun demoQueue(kind: MediaKind = MediaKind.VIDEO): List<MediaEntry> {
         val uri = Uri.fromFile(File(filesDir, "sample.mp4"))
         return (1..3).map { i ->
             MediaEntry(
-                uri = uri, name = "队列测试", kind = MediaKind.VIDEO,
+                uri = uri, name = "队列测试", kind = kind,
                 folder = "本地", extension = "mp4", title = "第 $i 集", episodeNumber = i
             )
         }
