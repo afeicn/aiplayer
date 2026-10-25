@@ -150,10 +150,8 @@ fun HomeScreen(
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(state.series) { series ->
-                            val total = series.totalEpisodes
                             MiniSeriesCard(series.title, series.cover, series.countLabel,
                                 onClick = { onOpenSeries(series) },
-                                progress = if (total > 0) series.downloadedCount.toFloat() / total else null,
                                 sharedKey = if (heroTitle != null && OfflineLibrary.sameTitle(series.title, heroTitle))
                                     null else posterKey(series.title))
                         }

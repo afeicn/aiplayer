@@ -60,10 +60,18 @@ data class DownloadedSeries(
 
     val newestCompletedAt: Long get() = episodes.maxOfOrNull { it.completedAt } ?: 0L
 
-    /** 卡上标注文案：知道总集数且还没下全时用「共 N 集，已下载 M 集」，否则只写「已下载 M 集」。 */
-    val countLabel: String get() =
-        if (totalEpisodes > downloadedCount) "共 $totalEpisodes 集，已下载 $downloadedCount 集"
-        else "已下载 $downloadedCount 集"
+    /** 已下载的最高集号（0 表示各集都没有可解析的集号）。 */
+    val maxEpisode: Int get() = episodes.mapNotNull { it.episodeNumber }.maxOrNull() ?: 0
+
+    /**
+     * 卡上标注文案：写「下载到第几集」而不是「已下载几集」——
+     * 看过删掉的集不计入，数量统计没有意义，最高集号才反映下载进度。
+     */
+    val countLabel: String get() = when {
+        maxEpisode > 0 && totalEpisodes > maxEpisode -> "共 $totalEpisodes 集，下载到第 $maxEpisode 集"
+        maxEpisode > 0 -> "下载到第 $maxEpisode 集"
+        else -> "已下载 $downloadedCount 集"
+    }
 }
 
 object OfflineLibrary {

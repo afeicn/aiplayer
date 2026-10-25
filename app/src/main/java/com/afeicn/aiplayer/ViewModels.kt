@@ -431,6 +431,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     init {
         publish()
         backfillMissingCovers()
+        backfillMissingBlurbs()
+    }
+
+    /** 老下载记录的简介自愈：blurb 为空但存了详情页地址的，后台抓简介回填（每次启动最多 5 部）。 */
+    private fun backfillMissingBlurbs() {
+        viewModelScope.launch {
+            OfflineDownloadManager.backfillMissingBlurbs(AppContainer.appContext)
+            publish()
+        }
     }
 
     /** 老下载记录的海报自愈：cover 为空但存了详情页地址的，后台抓海报回填（每次启动最多 5 部）。 */

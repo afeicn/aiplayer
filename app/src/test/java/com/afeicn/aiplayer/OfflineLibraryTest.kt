@@ -190,13 +190,36 @@ class OfflineLibraryTest {
         val kuangbiao = groups.first { it.title == "狂飙" }
         assertEquals(3, kuangbiao.downloadedCount)
         assertEquals(5, kuangbiao.totalEpisodes)
-        assertEquals("共 5 集，已下载 3 集", kuangbiao.countLabel)
+        assertEquals("下载到第 5 集", kuangbiao.countLabel)
         assertEquals(listOf(1, 3, 5), kuangbiao.episodes.map { it.episodeNumber })
 
         val qing = groups.first { it.title == "庆余年" }
         assertEquals(1, qing.downloadedCount)
         assertEquals(0, qing.totalEpisodes)
-        assertEquals("已下载 1 集", qing.countLabel)
+        assertEquals("下载到第 2 集", qing.countLabel)
+    }
+
+    @Test
+    fun countLabel_写到第几集而非数量_删过的集不影响() {
+        // 用户会看完删掉前面的集，数量统计没意义，标注最高下载进度。
+        val downloads = listOf(
+            dl(item("1", "庆余年", episodeName = "第20集", totalEpisodes = 24)),
+            dl(item("2", "庆余年", episodeName = "第05集", totalEpisodes = 24))
+        )
+        val series = OfflineLibrary.groupByTitle(OfflineLibrary.episodes(downloads)).first()
+        assertEquals("共 24 集，下载到第 20 集", series.countLabel)
+
+        // 总集数未知时只写下载到第几集。
+        val unknown = OfflineLibrary.groupByTitle(
+            OfflineLibrary.episodes(listOf(dl(item("3", "狂飙", episodeName = "第07集"))))
+        ).first()
+        assertEquals("下载到第 7 集", unknown.countLabel)
+
+        // 各集都解析不出集号时退回数量标注。
+        val noNumber = OfflineLibrary.groupByTitle(
+            OfflineLibrary.episodes(listOf(dl(item("4", "特别篇", episodeName = "剧场版"))))
+        ).first()
+        assertEquals("已下载 1 集", noNumber.countLabel)
     }
 
     @Test

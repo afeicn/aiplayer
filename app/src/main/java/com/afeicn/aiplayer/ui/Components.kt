@@ -363,11 +363,11 @@ fun HeroCard(label: String, title: String, subtitle: String, cover: String,
     }
 }
 
-/** 首页横滑小卡：与「为你推荐」同款结构缩小一档——海报在左、标题副题在右，已下载的带进度条。
+/** 首页横滑小卡：与「为你推荐」同款结构缩小一档——海报在左、标题副题在右。
  * sharedKey 传 null 表示这张与首页大卡是同一部作品，共享元素让给大卡，避免同页重复 key。 */
 @Composable
 fun MiniSeriesCard(title: String, cover: String, subtitle: String, onClick: () -> Unit,
-                   progress: Float? = null, modifier: Modifier = Modifier,
+                   modifier: Modifier = Modifier,
                    sharedKey: String? = posterKey(title)) {
     val palette = MaterialTheme.colorScheme
     Surface(
@@ -386,16 +386,6 @@ fun MiniSeriesCard(title: String, cover: String, subtitle: String, onClick: () -
                     overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = palette.onSurfaceVariant, fontSize = 10.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
-                if (progress != null) {
-                    Spacer(Modifier.height(3.dp))
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
-                        color = palette.primary,
-                        trackColor = palette.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth().height(3.dp).clip(CircleShape),
-                        gapSize = 0.dp, drawStopIndicator = {}
-                    )
-                }
             }
         }
     }
