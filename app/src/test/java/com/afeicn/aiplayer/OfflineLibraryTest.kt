@@ -371,4 +371,24 @@ class OfflineLibraryTest {
         assertEquals("一线刑警与黑恶势力二十年较量的故事。", groups.first { it.title == "狂飙" }.blurb)
         assertEquals("", groups.first { it.title == "庆余年" }.blurb)
     }
+
+    @Test
+    fun countLabel_跨季混一部退回数量标注() {
+        // 集号是季内的：一部里混两季时集号互相打架，最高集号不再反映进度，退回数量标注。
+        val downloads = listOf(
+            dl(item("1", "庆余年", episodeName = "第05集").copy(season = 1, episodeNumber = 5)),
+            dl(item("2", "庆余年", episodeName = "第03集").copy(season = 2, episodeNumber = 3))
+        )
+        val series = OfflineLibrary.groupByTitle(OfflineLibrary.episodes(downloads)).first()
+        assertEquals("已下载 2 集", series.countLabel)
+    }
+
+    @Test
+    fun countLabel_单季带季号标注写清哪季() {
+        val downloads = listOf(
+            dl(item("1", "庆余年", episodeName = "第02集", totalEpisodes = 36).copy(season = 2, episodeNumber = 2))
+        )
+        val series = OfflineLibrary.groupByTitle(OfflineLibrary.episodes(downloads)).first()
+        assertEquals("共 36 集，第2季 下载到第 2 集", series.countLabel)
+    }
 }

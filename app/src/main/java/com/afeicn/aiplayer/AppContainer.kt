@@ -84,4 +84,11 @@ class PlaybackProgressStore(context: Context) {
 
     fun recentPlays(): List<RecentPlay> =
         RecentPlayLog.decode(prefs.getString("recent", "").orEmpty())
+
+    /** 最近浏览海报自愈：给同名且封面为空的记录补封面（详情页/搜索结果抓到海报时顺带调用）。 */
+    fun patchRecentCover(title: String, cover: String) {
+        val current = recentPlays()
+        val patched = RecentPlayLog.patchCover(current, title, cover)
+        if (patched != current) prefs.edit().putString("recent", RecentPlayLog.encode(patched)).apply()
+    }
 }

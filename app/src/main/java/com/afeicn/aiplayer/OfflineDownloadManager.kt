@@ -301,22 +301,39 @@ object OfflineDownloadManager {
     suspend fun backfillMissingBlurbs(context: Context, maxTitles: Int = 5, fetcher: PageFetcher = HttpPageFetcher()) {
         ensureInitialized(context)
         val localStore = store ?: return
-        val targets = localStore.items()
-            .filter { it.blurb.isBlank() && it.detailUrl.isNotBlank() }
-            .groupBy { MediaTitle.normalize(MediaTitle.core(it.title)) }
-            .filterKeys { it.isNotEmpty() }
-            .values.take(maxTitles)
+        val marks = context.getSharedPreferences("blurb_backfill", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val targets = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            localStore.items()
+                .filter { it.blurb.isBlank() && it.detailUrl.isNotBlank() }
+                .groupBy { MediaTitle.normalize(MediaTitle.core(it.title)) }
+                .filterKeys { it.isNotEmpty() }
+                // 试过但抓不到（改版/防盗链）的冷却 7 天：否则同一批坏链接每次启动占满额度，
+                // 排在后面的剧永远轮不到。
+                .filterKeys { marks.getLong(it, 0L) + 7L * 24 * 3600_000 < now }
+                .values.take(maxTitles)
+        }
+        var patched = false
         for (group in targets) {
+            marks.edit().putLong(MediaTitle.normalize(MediaTitle.core(group.first().title)), now).apply()
             val detailUrl = group.firstNotNullOfOrNull { it.detailUrl.trim().takeIf(String::isNotEmpty) } ?: continue
             val referer = group.firstNotNullOfOrNull { it.headers["Referer"]?.takeIf { value -> value.isNotBlank() } }
-            val blurb = runCatching {
-                withContext(Dispatchers.IO) { VodBlurbParser.extract(fetcher.fetch(detailUrl, referer).body) }
-            }.getOrDefault("")
+            val blurb = try {
+                withContext(kotlinx.coroutines.Dispatchers.IO) { VodBlurbParser.extract(fetcher.fetch(detailUrl, referer).body) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // 作用域取消必须放行，不能当「没抓到」继续下一部。
+            } catch (e: Exception) {
+                ""
+            }
             if (blurb.isBlank()) continue
             val title = group.first().title
-            localStore.updateAll { item -> OfflineDownloadRules.patchBlurb(item, title, blurb) }
-            refresh()
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                localStore.updateAll { item -> OfflineDownloadRules.patchBlurb(item, title, blurb) }
+            }
+            patched = true
         }
+        // 整轮只刷一次索引，别每补一部读一遍 DownloadManager。
+        if (patched) withContext(kotlinx.coroutines.Dispatchers.IO) { refresh() }
     }
 
     /** 缓存占用（直接统计缓存目录文件大小，含在线播放顺手写入的缓存分片）。 */

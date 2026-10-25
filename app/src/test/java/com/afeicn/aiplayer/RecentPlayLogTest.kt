@@ -152,4 +152,21 @@ class RecentPlayLogTest {
         assertNull(RecentPlayLog.directVod(r.copy(detailUrl = ""), configured))
         assertNull(RecentPlayLog.directVod(r.copy(detailUrl = "javascript:void(0)"), configured))
     }
+
+    @Test
+    fun patchCover_只补空封面不动其它字段() {
+        val list = listOf(
+            RecentPlay("狂飙[全集]", "", 100L, playUrl = "http://play/1", detailUrl = "http://d/1"),
+            RecentPlay("庆余年", "http://c/old.jpg", 200L)
+        )
+        val patched = RecentPlayLog.patchCover(list, "狂飙", "http://c/p.jpg")
+        // 剥标记同名：空封面补上，时间/播放地址/详情页地址与顺序都不动。
+        assertEquals("http://c/p.jpg", patched[0].cover)
+        assertEquals(100L, patched[0].timeMillis)
+        assertEquals("http://play/1", patched[0].playUrl)
+        assertEquals("http://d/1", patched[0].detailUrl)
+        // 已有封面不覆盖；空封面参数原样返回。
+        assertEquals("http://c/old.jpg", RecentPlayLog.patchCover(list, "庆余年", "http://c/new.jpg")[1].cover)
+        assertEquals(list, RecentPlayLog.patchCover(list, "狂飙", ""))
+    }
 }

@@ -363,4 +363,16 @@ class OfflineDownloadRulesTest {
         // 空简介不写。
         assertEquals("", OfflineDownloadRules.patchBlurb(blank, "我不是大师", "").blurb)
     }
+
+    @Test
+    fun patch_来源标题带季标记也能回填() {
+        // 迁移把「第二季」剥进 season（存的是「仙武传」），来源标题常仍带季标记；
+        // 两边都剥季再比，否则多季剧的海报/简介回填全部静默失效。
+        val blank = OfflineItem(id = "1", title = "仙武传", url = "http://a/1.m3u8", season = 2)
+        assertEquals("http://c/p.jpg", OfflineDownloadRules.patchCover(blank, "仙武传 第二季", "http://c/p.jpg").cover)
+        assertEquals("两个少年的江湖路。", OfflineDownloadRules.patchBlurb(blank, "仙武传第二季", "两个少年的江湖路。").blurb)
+        // 不同季的同名剧也不串：存的是第 2 季，来源是第 1 季时按同名处理（回填只认剧名，季内条目各自同名同补）。
+        val s1 = OfflineItem(id = "2", title = "仙武传", url = "http://a/2.m3u8", season = 1)
+        assertEquals("http://c/p.jpg", OfflineDownloadRules.patchCover(s1, "仙武传 第一季", "http://c/p.jpg").cover)
+    }
 }

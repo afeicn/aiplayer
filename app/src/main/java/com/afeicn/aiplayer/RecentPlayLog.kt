@@ -48,6 +48,17 @@ object RecentPlayLog {
     private fun sanitize(field: String): String =
         field.replace('|', ' ').replace('\n', ' ').replace('\r', ' ')
 
+    /**
+     * 海报自愈：给同名且封面为空的记录补上封面，不动顺序/时间/播放地址；
+     * 已有封面不覆盖。全空或没有同名记录时原样返回。
+     */
+    fun patchCover(existing: List<RecentPlay>, title: String, cover: String): List<RecentPlay> {
+        if (cover.isBlank() || title.isBlank()) return existing
+        return existing.map {
+            if (OfflineLibrary.sameTitle(it.title, title) && it.cover.isBlank()) it.copy(cover = cover) else it
+        }
+    }
+
     /** 第 5 段 detailUrl 是后加的：老记录只有 4 段，解码时留空即可（向后兼容）。 */
     fun encode(entries: List<RecentPlay>): String =
         entries.joinToString("\n") {

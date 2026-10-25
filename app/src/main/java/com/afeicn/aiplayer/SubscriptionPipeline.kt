@@ -20,6 +20,9 @@ import kotlinx.coroutines.withContext
  *     → 音频直链分流 [fetchAudioLinks] → 批量入队 [EpisodeBatchDownloader]。
  */
 
+/** 抓详情页的结果：集数 + 是否 AI 辅助 + 原始页面。页面随结果返回，海报/简介复用同一份 HTML，不再二次抓取。 */
+data class DetailFetch(val episodes: List<EpisodeLink>, val aiAssisted: Boolean, val page: FetchedPage?)
+
 object SubscriptionPipeline {
 
     /** 后台解析协程的常驻作用域：面板关闭后不随 UI 取消，保证「获取地址中」能被推进到底。 */
@@ -49,19 +52,19 @@ object SubscriptionPipeline {
         source: OnlineVideoSource,
         fetcher: PageFetcher = HttpPageFetcher(),
         ai: DeepSeekClient? = null
-    ): Pair<List<EpisodeLink>, Boolean> = withContext(Dispatchers.IO) {
+    ): DetailFetch = withContext(Dispatchers.IO) {
         val referer = source.referer.takeIf { it.isNotBlank() }
-        val page = runCatching { fetcher.fetch(detailUrl, referer) }.getOrNull() ?: return@withContext emptyList<EpisodeLink>() to false
+        val page = runCatching { fetcher.fetch(detailUrl, referer) }.getOrNull() ?: return@withContext DetailFetch(emptyList(), false, null)
         val deterministic = EpisodeListParser.extract(page.body, page.url)
-        if (deterministic.isNotEmpty()) return@withContext deterministic to false
-        if (ai == null) return@withContext emptyList<EpisodeLink>() to false
+        if (deterministic.isNotEmpty()) return@withContext DetailFetch(deterministic, false, page)
+        if (ai == null) return@withContext DetailFetch(emptyList(), false, page)
         val extracted = ai.extractEpisodes(title, page.body, source.normalizedBase).take(50)
         val validated = extracted.filter { ep -> runCatching { fetcher.fetch(ep.url, detailUrl) }.isSuccess }
         val episodes = validated.mapIndexed { offset, ep ->
             val index = offset + 1
             EpisodeLink(index, ep.name.ifBlank { "第${index}集" }, ep.url)
         }
-        episodes to episodes.isNotEmpty()
+        DetailFetch(episodes, episodes.isNotEmpty(), page)
     }
 
     /** 音频源：从页面里找 `<audio src>` 或 `.mp3/.m4a/.flac/.aac` 直链（相对地址补全）。 */
@@ -145,10 +148,12 @@ object SubscriptionPipeline {
             }
         } else {
             // 详情页只抓一次：集数、海报与简介从同一份 HTML 解析，随下载记录落库。
-            val page = runCatching { fetcher.fetch(detailUrl, null) }.getOrNull()
-            val episodes = page?.let { EpisodeListParser.extract(it.body, it.url) }.orEmpty()
-            val poster = page?.let { PosterFinder.find(it.body, it.url) }.orEmpty()
-            val blurb = page?.let { VodBlurbParser.extract(it.body) }.orEmpty()
+            // 抓取失败直接上抛（与音频分支同口径）：吞掉会变成「0 集的成功批次」，用户以为下完了。
+            val referer = source.referer.takeIf { it.isNotBlank() }
+            val page = fetcher.fetch(detailUrl, referer)
+            val episodes = EpisodeListParser.extract(page.body, page.url)
+            val poster = PosterFinder.find(page.body, page.url)
+            val blurb = VodBlurbParser.extract(page.body)
             val byIndex = episodes.associateBy { it.index }
             indices.mapNotNull { index ->
                 val episode = byIndex[index] ?: return@mapNotNull null

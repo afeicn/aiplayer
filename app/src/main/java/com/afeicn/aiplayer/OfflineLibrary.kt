@@ -60,17 +60,23 @@ data class DownloadedSeries(
 
     val newestCompletedAt: Long get() = episodes.maxOfOrNull { it.completedAt } ?: 0L
 
-    /** 已下载的最高集号（0 表示各集都没有可解析的集号）。 */
-    val maxEpisode: Int get() = episodes.mapNotNull { it.episodeNumber }.maxOrNull() ?: 0
+    /** 已下载的最新一集（先比季再比集号；0 季表示无季）。 */
+    val latestEpisode: DownloadedEpisode? get() =
+        episodes.maxWithOrNull(compareBy({ it.season }, { it.episodeNumber ?: 0 }))
 
     /**
      * 卡上标注文案：写「下载到第几集」而不是「已下载几集」——
      * 看过删掉的集不计入，数量统计没有意义，最高集号才反映下载进度。
+     * 集号是季内的，一部里混多季时集号会互相打架，退回数量标注；单季带季号时标注写清是哪季。
      */
-    val countLabel: String get() = when {
-        maxEpisode > 0 && totalEpisodes > maxEpisode -> "共 $totalEpisodes 集，下载到第 $maxEpisode 集"
-        maxEpisode > 0 -> "下载到第 $maxEpisode 集"
-        else -> "已下载 $downloadedCount 集"
+    val countLabel: String get() {
+        val latest = latestEpisode
+        val seasons = episodes.map { it.season }.distinct()
+        if (latest?.episodeNumber == null || seasons.size > 1) return "已下载 $downloadedCount 集"
+        val seasonPrefix = if (latest.season > 0) "第${latest.season}季 " else ""
+        val max = latest.episodeNumber
+        return if (totalEpisodes > max) "共 $totalEpisodes 集，${seasonPrefix}下载到第 $max 集"
+        else "${seasonPrefix}下载到第 $max 集"
     }
 }
 

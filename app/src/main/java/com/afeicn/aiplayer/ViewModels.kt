@@ -168,8 +168,14 @@ class EpisodeSheetViewModel : ViewModel() {
     /** 在线搜索结果卡：有线路走直链，否则抓第一个详情页。 */
     fun load(vod: AggregatedVod) {
         sheetCover = vod.pic
-        if (vod.pic.isNotBlank())
-            OfflineDownloadManager.backfillCover(AppContainer.appContext, vod.name, vod.pic)
+        if (vod.pic.isNotBlank()) {
+            // 搜索结果带图：顺手把「最近浏览」里同名作品的空封面补上。
+            AppContainer.playbackProgress.patchRecentCover(vod.name, vod.pic)
+            // 回填要读写下载库文件，挪到 IO 线程，别卡面板打开。
+            viewModelScope.launch(Dispatchers.IO) {
+                OfflineDownloadManager.backfillCover(AppContainer.appContext, vod.name, vod.pic)
+            }
+        }
         val hit = vod.hits.firstOrNull { it.item.playGroups.isNotEmpty() }
         if (hit != null) {
             val group = hit.item.playGroups.first()
@@ -251,7 +257,8 @@ class EpisodeSheetViewModel : ViewModel() {
                 }
             }
             result.fold(
-                onSuccess = { (list, aiAssisted) ->
+                onSuccess = { fetched ->
+                    val list = fetched.episodes
                     if (list.isEmpty()) {
                         _state.value = EpisodeSheetUiState(title = title, error = ContinueDownloadRules.FETCH_EMPTY)
                     } else {
@@ -260,18 +267,18 @@ class EpisodeSheetViewModel : ViewModel() {
                             episodes = list,
                             statuses = OfflineLibrary.episodeStatuses(OfflineDownloadManager.downloads.value, title),
                             resumeEpisode = AppContainer.playbackProgress.lastEpisodeOf(title),
-                            notice = if (aiAssisted) "AI 智能解析出的集数，个别集可能不准" else null
+                            notice = if (fetched.aiAssisted) "AI 智能解析出的集数，个别集可能不准" else null
                         )
                         // 详情页顺带提取主海报：给下载记录与「最近浏览」补图（部分源搜索结果本身没图）。
+                        // 复用抓集数那份 HTML，不再二次抓同一页。
                         if (sheetCover.isBlank()) {
-                            val poster = runCatching {
-                                withContext(Dispatchers.IO) {
-                                    SubscriptionPipeline.fetchPoster(detailUrl, source.referer.takeIf { it.isNotBlank() })
-                                }
-                            }.getOrDefault("")
+                            val poster = fetched.page?.let { PosterFinder.find(it.body, it.url) }.orEmpty()
                             if (poster.isNotBlank()) {
                                 sheetCover = poster
-                                OfflineDownloadManager.backfillCover(AppContainer.appContext, title, poster)
+                                AppContainer.playbackProgress.patchRecentCover(title, poster)
+                                launch(Dispatchers.IO) {
+                                    OfflineDownloadManager.backfillCover(AppContainer.appContext, title, poster)
+                                }
                             }
                         }
                     }
@@ -437,7 +444,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** 老下载记录的简介自愈：blurb 为空但存了详情页地址的，后台抓简介回填（每次启动最多 5 部）。 */
     private fun backfillMissingBlurbs() {
         viewModelScope.launch {
-            OfflineDownloadManager.backfillMissingBlurbs(AppContainer.appContext)
+            withContext(Dispatchers.IO) { OfflineDownloadManager.backfillMissingBlurbs(AppContainer.appContext) }
             publish()
         }
     }
@@ -450,11 +457,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 .take(5)
             for (series in targets) {
                 val detailUrl = series.sourceItem?.detailUrl?.trim().orEmpty()
+                // 带来源请求头里的 Referer：不少站点无 Referer 直接 403，自愈永远抓不到。
+                val referer = series.sourceItem?.headers?.get("Referer")?.takeIf { it.isNotBlank() }
                 val poster = runCatching {
-                    withContext(Dispatchers.IO) { SubscriptionPipeline.fetchPoster(detailUrl) }
+                    withContext(Dispatchers.IO) { SubscriptionPipeline.fetchPoster(detailUrl, referer) }
                 }.getOrNull().orEmpty()
                 if (poster.isNotBlank()) {
-                    OfflineDownloadManager.backfillCover(AppContainer.appContext, series.title, poster)
+                    withContext(Dispatchers.IO) {
+                        OfflineDownloadManager.backfillCover(AppContainer.appContext, series.title, poster)
+                    }
                     publish()
                 }
             }
@@ -568,11 +579,20 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch {
                 val resume = runCatching {
                     withContext(Dispatchers.IO) {
-                        val (episodes, _) = SubscriptionPipeline.fetchEpisodesWithFallback(
+                        val fetched = SubscriptionPipeline.fetchEpisodesWithFallback(
                             detailUrl, vod.name, source, HttpPageFetcher(), AppContainer.aiClientOrNull()
                         )
+                        val episodes = fetched.episodes
                         val ep = episodes.firstOrNull { it.index == target } ?: episodes.firstOrNull()
                             ?: return@withContext null
+                        // 顺带给下载记录与「最近浏览」补海报（同一份页面 HTML，不二次抓取）。
+                        fetched.page?.let { page ->
+                            val poster = PosterFinder.find(page.body, page.url)
+                            if (poster.isNotBlank()) {
+                                AppContainer.playbackProgress.patchRecentCover(vod.name, poster)
+                                OfflineDownloadManager.backfillCover(AppContainer.appContext, vod.name, poster)
+                            }
+                        }
                         val stream = SubscriptionPipeline.resolveStream(ep.url) ?: return@withContext null
                         AppContainer.playbackProgress.saveLastEpisode(vod.name, ep.index)
                         RecentResume(vod, networkStreamEntry(stream), ep.url)

@@ -152,7 +152,10 @@ private fun PlayerApp(activity: ComponentActivity) {
                     target.vod.detailUrls.firstOrNull().orEmpty()
                 )
             is DetailTarget.Offline ->
-                AppContainer.playbackProgress.recordView(target.series.title, target.series.cover, System.currentTimeMillis())
+                AppContainer.playbackProgress.recordView(
+                    target.series.title, target.series.cover, System.currentTimeMillis(),
+                    target.series.detailUrl
+                )
         }
         detailTarget = target
         detailOrigin = page
@@ -177,7 +180,10 @@ private fun PlayerApp(activity: ComponentActivity) {
                     sheet.vod.detailUrls.firstOrNull().orEmpty()
                 )
             is SheetTarget.Continue ->
-                AppContainer.playbackProgress.recordPlay(sheet.series.title, sheet.series.cover, "", System.currentTimeMillis())
+                AppContainer.playbackProgress.recordPlay(
+                    sheet.series.title, sheet.series.cover, "", System.currentTimeMillis(),
+                    sheet.series.detailUrl
+                )
             null -> Unit
         }
         playerVm.playQueue(entries, startIndex)
@@ -330,8 +336,15 @@ private fun PlayerApp(activity: ComponentActivity) {
                         else {
                             homeVm.findRecentVod(r.title) { vod ->
                                 if (vod != null) openDetails(DetailTarget.Online(vod))
-                                // 缓存和搜索都定位不到：留在首页提示，不再跳发现页触发可见搜索。
-                                else scope.launch { snackbar.showSnackbar("找不到「${r.title}」，可能已下架") }
+                                // 缓存和搜索都定位不到：留在首页提示，给「去搜索」按钮由用户自己发起搜索。
+                                else scope.launch {
+                                    val result = snackbar.showSnackbar("找不到「${r.title}」，可能已下架", "去搜索")
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        query = r.title
+                                        searchVm.search(r.title)
+                                        page = Page.DISCOVER
+                                    }
+                                }
                             }
                         }
                     }

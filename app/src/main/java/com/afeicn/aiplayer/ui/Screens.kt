@@ -525,25 +525,13 @@ fun DetailScreen(
                     Text("这条结果需要先打开详情页抓集数，选集后可以在线播放或下载。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 19.sp)
                 }
-                if (blurbLoading || blurb.isNotBlank()) {
+                if (blurbLoading) {
                     Spacer(Modifier.height(6.dp))
-                    Text("剧情简介", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    if (blurbLoading) {
-                        Text("正在获取简介…", fontSize = 12.sp, lineHeight = 19.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        Text(blurb, fontSize = 13.sp, lineHeight = 21.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = if (blurbExpanded) Int.MAX_VALUE else 4,
-                            overflow = TextOverflow.Ellipsis)
-                        // 超过 4 行才出「展开」，短简介不打扰。
-                        if (blurb.length > 120) {
-                            TextButton(onClick = { blurbExpanded = !blurbExpanded },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
-                                Text(if (blurbExpanded) "收起" else "展开", fontSize = 13.sp)
-                            }
-                        }
-                    }
+                    Text("正在获取简介…", fontSize = 12.sp, lineHeight = 19.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (blurb.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    BlurbCard(blurb, blurbExpanded) { blurbExpanded = !blurbExpanded }
                 }
             }
         }
@@ -566,8 +554,10 @@ fun DetailScreen(
     LaunchedEffect(series.title) {
         val url = series.detailUrl
         if (blurb.isBlank() && url.isNotBlank()) {
+            // 带来源请求头里的 Referer：不少站点无 Referer 直接 403，懒抓永远失败。
+            val referer = series.sourceItem?.headers?.get("Referer")?.takeIf { it.isNotBlank() }
             blurb = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { VodBlurbParser.extract(HttpPageFetcher().fetch(url, null).body) }.getOrDefault("")
+                runCatching { VodBlurbParser.extract(HttpPageFetcher().fetch(url, referer).body) }.getOrDefault("")
             }
         }
     }
@@ -613,27 +603,35 @@ fun DetailScreen(
             }
         }
         if (blurb.isNotBlank()) item {
-            Surface(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-                shape = cardShape, color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(4.dp).height(16.dp).clip(CircleShape).background(Ink.Violet))
-                        Spacer(Modifier.width(8.dp))
-                        Text("剧情简介", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Text(blurb, fontSize = 13.sp, lineHeight = 21.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (blurbExpanded) Int.MAX_VALUE else 4,
-                        overflow = TextOverflow.Ellipsis)
-                    // 与在线详情页同款：超过 4 行才出「展开」，短简介不打扰。
-                    if (blurb.length > 120) {
-                        TextButton(onClick = { blurbExpanded = !blurbExpanded },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
-                            Text(if (blurbExpanded) "收起" else "展开", fontSize = 13.sp, color = Ink.Violet)
-                        }
-                    }
+            Box(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                BlurbCard(blurb, blurbExpanded) { blurbExpanded = !blurbExpanded }
+            }
+        }
+    }
+}
+
+/** 详情页「剧情简介」卡片：在线与离线详情页共用同一款（紫条标题 + 4 行折叠 + 展开/收起）。 */
+@Composable
+private fun BlurbCard(blurb: String, expanded: Boolean, onToggle: () -> Unit) {
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = cardShape, color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(4.dp).height(16.dp).clip(CircleShape).background(Ink.Violet))
+                Spacer(Modifier.width(8.dp))
+                Text("剧情简介", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(blurb, fontSize = 13.sp, lineHeight = 21.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = if (expanded) Int.MAX_VALUE else 4,
+                overflow = TextOverflow.Ellipsis)
+            // 超过 4 行才出「展开」，短简介不打扰。
+            if (blurb.length > 120) {
+                TextButton(onClick = onToggle,
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
+                    Text(if (expanded) "收起" else "展开", fontSize = 13.sp, color = Ink.Violet)
                 }
             }
         }

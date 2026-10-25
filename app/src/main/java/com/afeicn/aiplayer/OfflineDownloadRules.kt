@@ -79,14 +79,21 @@ object OfflineDownloadRules {
     fun findDuplicateId(existingIds: Set<String>, url: String): String? =
         downloadIdFor(url).takeIf { it in existingIds }
 
+    /**
+     * 同名判定：下载记录的季已被迁移剥进 [OfflineItem.season]（存的是「某某传」），
+     * 来源标题常仍带「第二季」，比对前两边都剥一次季，否则多季剧的回填全部静默失效。
+     */
+    private fun sameSeries(a: String, b: String): Boolean =
+        OfflineLibrary.sameTitle(EpisodeNaming.splitSeason(a).name, EpisodeNaming.splitSeason(b).name)
+
     /** 海报回填：只给同名且海报为空的条目补上，已有海报不覆盖。 */
     fun patchCover(item: OfflineItem, title: String, cover: String): OfflineItem =
-        if (cover.isNotBlank() && item.cover.isBlank() && OfflineLibrary.sameTitle(item.title, title))
+        if (cover.isNotBlank() && item.cover.isBlank() && sameSeries(item.title, title))
             item.copy(cover = cover) else item
 
     /** 简介回填：只给同名且简介为空的条目补上，已有简介不覆盖。 */
     fun patchBlurb(item: OfflineItem, title: String, blurb: String): OfflineItem =
-        if (blurb.isNotBlank() && item.blurb.isBlank() && OfflineLibrary.sameTitle(item.title, title))
+        if (blurb.isNotBlank() && item.blurb.isBlank() && sameSeries(item.title, title))
             item.copy(blurb = blurb) else item
 
     /** Media3 [Download] 状态 + 停因 → 本地 UI 状态。 */
