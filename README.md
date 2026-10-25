@@ -28,7 +28,7 @@
 |:---:|:---:|:---:|
 | <img src="docs/screens/detail.png" width="200"> | <img src="docs/screens/downloads.png" width="200"> | <img src="docs/screens/player.png" width="340"> |
 
-> 截图中的订阅源与片单均为演示数据；本仓库不内置任何视频源。
+> 截图中的海报与片名均已打码处理；本仓库不内置任何视频源，源列表初始为空。
 
 ## 构建
 
