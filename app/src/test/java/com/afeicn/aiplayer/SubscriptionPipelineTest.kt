@@ -86,4 +86,21 @@ class SubscriptionPipelineTest {
         assertEquals(1, items.size)
         assertEquals("第01集", items[0].episodeName)
     }
+
+    @Test
+    fun blurbFromDetailPageMetaIsStoredOnOfflineItems() = runBlocking {
+        val source = OnlineVideoSource(id = "empirecms", name = "6v电影", base = "https://cms.example.com")
+        val fetcher = FakeFetcher { url ->
+            val body = when {
+                url == detailUrl -> """<meta name="description" content="青年范闲身世神秘，一路卷入庙堂江湖。">""" + detailHtml
+                url.contains("/e/DownSys/play/") -> playHtml
+                url.contains("player.example.com/play/") -> iframeHtml
+                else -> "<html></html>"
+            }
+            FetchedPage(url = url, contentType = "text/html", body = body)
+        }
+        val items = SubscriptionPipeline.resolveItems("庆余年", source, detailUrl, listOf(1, 3), fetcher)
+        assertEquals(2, items.size)
+        assertTrue(items.all { it.blurb == "青年范闲身世神秘，一路卷入庙堂江湖。" })
+    }
 }

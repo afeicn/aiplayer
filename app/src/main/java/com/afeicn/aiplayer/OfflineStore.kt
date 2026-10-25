@@ -46,7 +46,13 @@ data class OfflineItem(
      * 老数据只有 `episodeName`（`第01集`）没有集号字段，迁移时解析后落库，供排序、去重、
      * 选集角标直接使用，不用每次展示再解析一遍字符串。
      */
-    val episodeNumber: Int = 0
+    val episodeNumber: Int = 0,
+    /**
+     * 剧集简介（下载时从详情页 HTML 提取，见 [VodBlurbParser]；空表示没有）。
+     *
+     * 老数据没有这个字段，读出来是空串；离线详情页将来靠它离线展示简介。
+     */
+    val blurb: String = ""
 ) {
     val isHls: Boolean get() =
         extension == "m3u8" || extension == "m3u" || url.substringBefore('?').endsWith(".m3u8")
@@ -187,6 +193,8 @@ object OfflineItemCodec {
         // 结构化季/集号：老版本读到未知字段会忽略；新版本据此排序与拼命名。
         put("season", item.season)
         put("episodeNumber", item.episodeNumber)
+        // 简介：老版本读到未知字段会忽略；老数据缺这个字段时读出来是空串。
+        put("blurb", item.blurb)
         put("headers", JSONObject().apply { item.headers.forEach { (key, value) -> put(key, value) } })
     }
 
@@ -223,7 +231,8 @@ object OfflineItemCodec {
             resolveIndex = obj.optInt("resolveIndex"),
             detailUrl = obj.optString("detailUrl"),
             season = obj.optInt("season"),
-            episodeNumber = obj.optInt("episodeNumber")
+            episodeNumber = obj.optInt("episodeNumber"),
+            blurb = obj.optString("blurb")
         )
     }
 }

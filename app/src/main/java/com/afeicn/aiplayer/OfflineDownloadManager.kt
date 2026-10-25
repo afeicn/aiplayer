@@ -293,6 +293,32 @@ object OfflineDownloadManager {
         refresh()
     }
 
+    /**
+     * 简介自愈：简介为空但存了详情页地址的老下载记录，抓详情页提取简介回填
+     * （每次最多 [maxTitles] 部，节奏同海报自愈；启动调度由 UI 层接线调用）。
+     * 同一部剧的多集按归一化剧名归组，只抓一次详情页、整部一起补。
+     */
+    suspend fun backfillMissingBlurbs(context: Context, maxTitles: Int = 5, fetcher: PageFetcher = HttpPageFetcher()) {
+        ensureInitialized(context)
+        val localStore = store ?: return
+        val targets = localStore.items()
+            .filter { it.blurb.isBlank() && it.detailUrl.isNotBlank() }
+            .groupBy { MediaTitle.normalize(MediaTitle.core(it.title)) }
+            .filterKeys { it.isNotEmpty() }
+            .values.take(maxTitles)
+        for (group in targets) {
+            val detailUrl = group.firstNotNullOfOrNull { it.detailUrl.trim().takeIf(String::isNotEmpty) } ?: continue
+            val referer = group.firstNotNullOfOrNull { it.headers["Referer"]?.takeIf { value -> value.isNotBlank() } }
+            val blurb = runCatching {
+                withContext(Dispatchers.IO) { VodBlurbParser.extract(fetcher.fetch(detailUrl, referer).body) }
+            }.getOrDefault("")
+            if (blurb.isBlank()) continue
+            val title = group.first().title
+            localStore.updateAll { item -> OfflineDownloadRules.patchBlurb(item, title, blurb) }
+            refresh()
+        }
+    }
+
     /** 缓存占用（直接统计缓存目录文件大小，含在线播放顺手写入的缓存分片）。 */
     fun cacheSpaceBytes(context: Context): Long {
         val dir = File(context.applicationContext.filesDir, "downloads")

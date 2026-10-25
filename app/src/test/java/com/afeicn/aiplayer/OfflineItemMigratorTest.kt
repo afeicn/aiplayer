@@ -337,4 +337,29 @@ class OfflineItemMigratorTest {
         assertEquals(0, decoded.episodeNumber)
         assertEquals(5, OfflineItemMigrator.migrate(decoded).episodeNumber)
     }
+
+    // ---------- 简介字段兼容 ----------
+
+    @Test
+    fun 老记录缺blurb字段_读出空串不丢条目() {
+        val legacy = JSONObject().apply {
+            put("id", "legacy-blurb")
+            put("title", "我不是大师[全集]")
+            put("url", "https://example.com/legacy.m3u8")
+            put("episodeName", "第05集")
+        }
+        val decoded = OfflineItemCodec.decodeItem(legacy)
+        assertEquals("legacy-blurb", decoded.id)
+        assertEquals("", decoded.blurb)
+        // 整段老 JSON 也能全量解出。
+        val array = JSONArray().put(legacy)
+        assertEquals(1, OfflineItemCodec.decode(array.toString()).size)
+    }
+
+    @Test
+    fun blurb字段_编码后原样读出() {
+        val item = realItem(1).copy(blurb = "一个关于大师的故事，简介到此为止。")
+        val decoded = OfflineItemCodec.decodeItem(OfflineItemCodec.encodeItem(item))
+        assertEquals("一个关于大师的故事，简介到此为止。", decoded.blurb)
+    }
 }

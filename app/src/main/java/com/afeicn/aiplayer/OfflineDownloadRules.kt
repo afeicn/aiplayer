@@ -84,6 +84,11 @@ object OfflineDownloadRules {
         if (cover.isNotBlank() && item.cover.isBlank() && OfflineLibrary.sameTitle(item.title, title))
             item.copy(cover = cover) else item
 
+    /** 简介回填：只给同名且简介为空的条目补上，已有简介不覆盖。 */
+    fun patchBlurb(item: OfflineItem, title: String, blurb: String): OfflineItem =
+        if (blurb.isNotBlank() && item.blurb.isBlank() && OfflineLibrary.sameTitle(item.title, title))
+            item.copy(blurb = blurb) else item
+
     /** Media3 [Download] 状态 + 停因 → 本地 UI 状态。 */
     fun mapState(state: Int, stopReason: Int = Download.STOP_REASON_NONE): DownloadTaskState = when (state) {
         Download.STATE_QUEUED -> DownloadTaskState.QUEUED

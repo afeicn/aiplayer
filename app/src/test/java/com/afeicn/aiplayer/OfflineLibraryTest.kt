@@ -335,4 +335,17 @@ class OfflineLibraryTest {
         assertEquals(DownloadTaskState.RESOLVING, statuses[2])
         assertEquals(DownloadTaskState.PAUSED, statuses[3])
     }
+
+    @Test
+    fun groupByTitle_简介取该剧第一个非空blurb() {
+        val downloads = listOf(
+            dl(item("1", "狂飙", episodeName = "第01集")),
+            dl(item("2", "狂飙", episodeName = "第02集").copy(blurb = "一线刑警与黑恶势力二十年较量的故事。")),
+            dl(item("3", "狂飙", episodeName = "第03集").copy(blurb = "后来的简介不该顶掉第一条。")),
+            dl(item("4", "庆余年", episodeName = "第01集"))
+        )
+        val groups = OfflineLibrary.groupByTitle(OfflineLibrary.episodes(downloads))
+        assertEquals("一线刑警与黑恶势力二十年较量的故事。", groups.first { it.title == "狂飙" }.blurb)
+        assertEquals("", groups.first { it.title == "庆余年" }.blurb)
+    }
 }

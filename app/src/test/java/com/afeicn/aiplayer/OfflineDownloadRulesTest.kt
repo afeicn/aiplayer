@@ -346,4 +346,21 @@ class OfflineDownloadRulesTest {
         // 空海报不写。
         assertEquals("", OfflineDownloadRules.patchCover(blank, "我不是大师", "").cover)
     }
+
+    // ==================== 简介回填 ====================
+
+    @Test
+    fun patchBlurbOnlyFillsBlankSameTitle() {
+        val blank = OfflineItem(id = "1", title = "我不是大师", url = "http://a/1.m3u8")
+        val patched = OfflineDownloadRules.patchBlurb(blank, "我不是大师", "一个关于大师的故事。")
+        assertEquals("一个关于大师的故事。", patched.blurb)
+        // 已有简介不覆盖。
+        val filled = blank.copy(blurb = "旧简介")
+        assertEquals("旧简介", OfflineDownloadRules.patchBlurb(filled, "我不是大师", "新简介").blurb)
+        // 不同名不动。
+        val other = OfflineItem(id = "2", title = "庆余年", url = "http://a/2.m3u8")
+        assertEquals("", OfflineDownloadRules.patchBlurb(other, "我不是大师", "新简介").blurb)
+        // 空简介不写。
+        assertEquals("", OfflineDownloadRules.patchBlurb(blank, "我不是大师", "").blurb)
+    }
 }

@@ -37,6 +37,8 @@ data class DownloadedSeries(
     val detailUrl: String = "",
     /** 来源名（重建 [OnlineVideoSource] 用）。 */
     val sourceName: String = "",
+    /** 这部剧的简介（各集里第一个非空的 [OfflineItem.blurb]；空表示没有）。 */
+    val blurb: String = "",
     /** 媒体类型（音频剧走音频解析路径）。 */
     val kind: MediaKind = MediaKind.VIDEO
 ) {
@@ -161,6 +163,7 @@ object OfflineLibrary {
                     title = title,
                     episodes = ordered,
                     cover = list.firstOrNull { it.cover.isNotBlank() }?.cover.orEmpty(),
+                    blurb = list.firstOrNull { it.item.blurb.isNotBlank() }?.item?.blurb.orEmpty(),
                     detailUrl = source?.item?.detailUrl?.trim().orEmpty(),
                     sourceName = source?.item?.sourceName.orEmpty(),
                     kind = source?.item?.kind ?: MediaKind.VIDEO

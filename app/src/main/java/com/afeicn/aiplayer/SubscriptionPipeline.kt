@@ -84,7 +84,8 @@ object SubscriptionPipeline {
         stream: NetworkStream,
         totalEpisodes: Int = 0,
         detailUrl: String = "",
-        cover: String = ""
+        cover: String = "",
+        blurb: String = ""
     ): OfflineItem =
         OfflineItem(
             id = "",
@@ -99,7 +100,8 @@ object SubscriptionPipeline {
             kind = MediaKind.VIDEO,
             totalEpisodes = totalEpisodes,
             // 记住这部剧的详情页：「继续下载」凭它重抓集数，不用回搜索页从头搜。
-            detailUrl = detailUrl
+            detailUrl = detailUrl,
+            blurb = blurb
         )
 
     /** 音频直链 → 离线项（kind=AUDIO，走 ProgressiveDownloader，不是 HLS）。 */
@@ -142,15 +144,16 @@ object SubscriptionPipeline {
                 links.getOrNull(index - 1)?.let { offlineItemForAudio(dramaTitle, source, index, it, totalEpisodes = links.size, detailUrl = detailUrl) }
             }
         } else {
-            // 详情页只抓一次：集数与海报从同一份 HTML 解析，海报随下载记录落库。
+            // 详情页只抓一次：集数、海报与简介从同一份 HTML 解析，随下载记录落库。
             val page = runCatching { fetcher.fetch(detailUrl, null) }.getOrNull()
             val episodes = page?.let { EpisodeListParser.extract(it.body, it.url) }.orEmpty()
             val poster = page?.let { PosterFinder.find(it.body, it.url) }.orEmpty()
+            val blurb = page?.let { VodBlurbParser.extract(it.body) }.orEmpty()
             val byIndex = episodes.associateBy { it.index }
             indices.mapNotNull { index ->
                 val episode = byIndex[index] ?: return@mapNotNull null
                 val stream = resolveStream(episode.url, fetcher) ?: return@mapNotNull null
-                offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster)
+                offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster, blurb = blurb)
             }
         }
     }
@@ -246,10 +249,11 @@ object SubscriptionPipeline {
                 }
             }
         } else {
-            // 详情页只抓一次：集数与海报同源解析，海报随真实地址一起转正落库。
+            // 详情页只抓一次：集数、海报与简介同源解析，随真实地址一起转正落库。
             val page = runCatching { fetcher.fetch(detailUrl, source.referer.takeIf { it.isNotBlank() }) }.getOrNull()
             val episodes = page?.let { EpisodeListParser.extract(it.body, it.url) }.orEmpty()
             val poster = cover.ifBlank { page?.let { PosterFinder.find(it.body, it.url) }.orEmpty() }
+            val blurb = page?.let { VodBlurbParser.extract(it.body) }.orEmpty()
             val byIndex = episodes.associateBy { it.index }
             val semaphore = Semaphore(EpisodeBatchDownloader.DEFAULT_CONCURRENCY.coerceAtLeast(1))
             coroutineScope {
@@ -262,7 +266,7 @@ object SubscriptionPipeline {
                             if (episode != null && stream != null) {
                                 OfflineDownloadManager.promoteResolved(
                                     context, placeholderId,
-                                    offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster)
+                                    offlineItemForEpisode(dramaTitle, source, episode, stream, totalEpisodes = episodes.size, detailUrl = detailUrl, cover = poster, blurb = blurb)
                                 )
                             } else {
                                 OfflineDownloadManager.failResolving(placeholderId)
