@@ -69,13 +69,28 @@ object HlsPlaylist {
         return best
     }
 
+    /** 分片：绝对地址 + EXTINF 时长（秒，缺失记 0），供并发下载与进度估算。 */
+    data class Segment(val uri: String, val durationSec: Double)
+
+    /** 媒体列表的分片（含时长），相对 base 解析为绝对地址；EXTINF 与紧随的分片行配对。 */
+    fun segments(text: String, baseUri: String): List<Segment> {
+        val out = mutableListOf<Segment>()
+        var pending: Double? = null
+        for (raw in text.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty()) continue
+            if (line.startsWith("#")) {
+                EXTINF_DURATION.find(line)?.let { pending = it.groupValues[1].toDoubleOrNull() }
+                continue
+            }
+            out += Segment(resolveUri(baseUri, line), pending ?: 0.0)
+            pending = null
+        }
+        return out
+    }
+
     /** 媒体列表的分片地址（跳过注释与空行），相对 base 解析为绝对地址。 */
-    fun segmentUris(text: String, baseUri: String): List<String> =
-        text.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("#") }
-            .map { resolveUri(baseUri, it) }
-            .toList()
+    fun segmentUris(text: String, baseUri: String): List<String> = segments(text, baseUri).map { it.uri }
 
     /** 用 EXTINF 时长总和 × 码率估算总字节数；信息不足返回 -1（未知）。 */
     fun estimateBytes(playlistText: String, bandwidthBps: Long): Long {
@@ -110,6 +125,8 @@ object HlsPlaylist {
  *
  * 与 DownloadManager 的契约：[download] 正常返回=完成；抛 IOException=失败（框架会重试）；
  * [cancel] 后尽快以 InterruptedException 返回（框架按停止原因处理）。
+ * 进度上报按 Media3 接口签名 onProgress(contentLength, bytesDownloaded, percentDownloaded)，
+ * percentDownloaded 为 0..100（Util.percentFloat 口径），未知时传 C.PERCENTAGE_UNSET。
  */
 @OptIn(UnstableApi::class)
 class ParallelHlsDownloader(
@@ -130,7 +147,7 @@ class ParallelHlsDownloader(
 
     override fun download(listener: Downloader.ProgressListener?) {
         val report = listener ?: object : Downloader.ProgressListener {
-            override fun onProgress(downloadedBytes: Long, totalBytes: Long, progressPercent: Float) {}
+            override fun onProgress(contentLength: Long, bytesDownloaded: Long, percentDownloaded: Float) {}
         }
         val masterUrl = request.uri.toString()
         val masterText = fetchText(masterUrl)
@@ -144,7 +161,7 @@ class ParallelHlsDownloader(
             variantUrl = masterUrl
             variantText = masterText
         }
-        val segments = HlsPlaylist.segmentUris(variantText, variantUrl)
+        val segments = HlsPlaylist.segments(variantText, variantUrl)
         if (segments.isEmpty()) throw IOException("播放列表里没有分片")
         if (canceled.get()) throw InterruptedException()
 
@@ -153,17 +170,39 @@ class ParallelHlsDownloader(
         if (variantUrl != masterUrl) cacheResource(variantUrl)
         if (canceled.get()) throw InterruptedException()
 
-        val totalBytes = HlsPlaylist.estimateBytes(variantText, HlsPlaylist.maxBandwidth(masterText))
+        val bandwidth = maxOf(HlsPlaylist.maxBandwidth(masterText), HlsPlaylist.variantBandwidth(variantText))
+        val totalDurationMs = segments.sumOf { (it.durationSec * 1000.0).toLong() }
         val downloaded = AtomicLong(0L)
+        val completedDurationMs = AtomicLong(0L)
+        // 总大小随进度修正：已下载真实字节 + 剩余分片按码率估算，避免「已下载 > 总大小」。
+        val remainingEstimate = AtomicLong(
+            if (bandwidth > 0) (segments.sumOf { it.durationSec } * bandwidth / 8.0).toLong() else -1L
+        )
         val firstError = AtomicReference<IOException?>()
         val queue = ConcurrentLinkedQueue(segments)
+        val reportLock = Any()
+
+        // 接口契约（Media3 1.11）：onProgress(contentLength, bytesDownloaded, percent)，percent 为 0..100。
+        // percent 用 EXTINF 时长加权：缓存命中（暂停恢复后）也计入，进度单调且最终到 100。
+        fun reportProgress() = synchronized(reportLock) {
+            val done = downloaded.get()
+            val remaining = remainingEstimate.get()
+            val contentLength = if (remaining >= 0) done + remaining else C.LENGTH_UNSET.toLong()
+            val percent = when {
+                totalDurationMs > 0 -> (completedDurationMs.get() * 100f / totalDurationMs).coerceIn(0f, 100f)
+                contentLength > 0 -> (done * 100f / contentLength).coerceIn(0f, 100f)
+                else -> C.PERCENTAGE_UNSET.toFloat()
+            }
+            report.onProgress(contentLength, done, percent)
+        }
+        reportProgress()
 
         val pool = Executors.newFixedThreadPool(segmentConcurrency.coerceAtLeast(1))
         try {
             repeat(segmentConcurrency.coerceAtLeast(1)) {
                 pool.execute {
                     while (!canceled.get() && firstError.get() == null) {
-                        val url = queue.poll() ?: break
+                        val segment = queue.poll() ?: break
                         val tookDegraded = try {
                             SegmentThrottle.acquire()
                         } catch (e: InterruptedException) {
@@ -171,10 +210,15 @@ class ParallelHlsDownloader(
                         }
                         try {
                             if (canceled.get()) break
-                            cacheResourceWithRetry(url, firstError)
-                            val done = downloaded.addAndGet(countingFactory.snapshotAndReset())
-                            val percent = if (totalBytes > 0) done.toFloat() / totalBytes else 0f
-                            report.onProgress(done, totalBytes, percent)
+                            cacheResourceWithRetry(segment.uri, firstError)
+                            downloaded.addAndGet(countingFactory.snapshotAndReset())
+                            completedDurationMs.addAndGet((segment.durationSec * 1000.0).toLong())
+                            val rem = remainingEstimate.get()
+                            if (rem >= 0 && bandwidth > 0) {
+                                val segEst = (segment.durationSec * bandwidth / 8.0).toLong()
+                                remainingEstimate.set((rem - segEst).coerceAtLeast(0L))
+                            }
+                            reportProgress()
                         } finally {
                             SegmentThrottle.release(tookDegraded)
                         }
@@ -182,8 +226,8 @@ class ParallelHlsDownloader(
                     // 收尾把剩余计数并入进度，避免少报。
                     val rest = countingFactory.snapshotAndReset()
                     if (rest > 0) {
-                        val done = downloaded.addAndGet(rest)
-                        report.onProgress(done, totalBytes, if (totalBytes > 0) done.toFloat() / totalBytes else 0f)
+                        downloaded.addAndGet(rest)
+                        reportProgress()
                     }
                 }
             }

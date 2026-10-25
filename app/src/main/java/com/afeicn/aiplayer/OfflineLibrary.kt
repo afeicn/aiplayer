@@ -243,9 +243,14 @@ object OfflineLibrary {
     ): Boolean = downloadedEpisode(downloads, title, index, episodeName) != null
 
     /** 剧名归一化比对（先洗掉 HTML 残渣，再忽略空白与大小写）。 */
+    /**
+     * 同一部剧判定：先剥 `[全集]`/`（第一季）` 这类附加标记再比。
+     * 下载条目存的是清洗后的剧名，搜索/详情页标题常带标记（如「我不是大师[全集]」），
+     * 不剥标记会让选集网格认不出已下载集。
+     */
     fun sameTitle(a: String, b: String): Boolean {
-        val left = MediaTitle.normalize(a)
-        val right = MediaTitle.normalize(b)
+        val left = MediaTitle.normalize(MediaTitle.core(a))
+        val right = MediaTitle.normalize(MediaTitle.core(b))
         return left.isNotEmpty() && left == right
     }
 }

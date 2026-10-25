@@ -46,6 +46,21 @@ class HlsPlaylistTest {
     }
 
     @Test
+    fun 分片时长与地址配对缺失EXTINF记零() {
+        val segs = HlsPlaylist.segments(media, "https://vip.example.com/2026/a/3000k/hls/mixed.m3u8")
+        assertEquals(2, segs.size)
+        assertEquals("https://vip.example.com/2026/a/3000k/hls/seg1.ts?hash=aaa", segs[0].uri)
+        assertEquals(10.0, segs[0].durationSec, 0.001)
+        assertEquals(9.5, segs[1].durationSec, 0.001)
+        // 没有 EXTINF 的分片时长记 0；EXT-X-ENDLIST 等注释不产生分片。
+        val bare = HlsPlaylist.segments("#EXTM3U\n#EXT-X-ENDLIST\nseg.ts\n", "https://a.com/x.m3u8")
+        assertEquals(1, bare.size)
+        assertEquals(0.0, bare[0].durationSec, 0.001)
+        // segmentUris 与 segments 保持同一解析结果。
+        assertEquals(segs.map { it.uri }, HlsPlaylist.segmentUris(media, "https://vip.example.com/2026/a/3000k/hls/mixed.m3u8"))
+    }
+
+    @Test
     fun 总字节按EXTINF时长乘码率估算() {
         // (10.0 + 9.5) 秒 × 3_000_000 bps ÷ 8 = 7_312_500 字节
         assertEquals(7_312_500L, HlsPlaylist.estimateBytes(media, 3_000_000L))

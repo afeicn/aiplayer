@@ -268,6 +268,25 @@ class OfflineLibraryTest {
         assertFalse(OfflineLibrary.sameTitle("狂飙", "庆余年"))
     }
 
+    @Test
+    fun sameTitle_剥掉全集等附加标记后仍能匹配() {
+        // 下载条目存清洗后的剧名，详情页标题常带 [全集]/（第一季） 标记。
+        assertTrue(OfflineLibrary.sameTitle("我不是大师", "我不是大师[全集]"))
+        assertTrue(OfflineLibrary.sameTitle("庆余年（第一季）", "庆余年【高清】"))
+        // 标记剥掉后主干不同仍算不同剧。
+        assertFalse(OfflineLibrary.sameTitle("我不是大师", "我是大师[全集]"))
+    }
+
+    @Test
+    fun episodeStatuses_详情页标题带全集标记也能认出已下载集() {
+        val downloads = listOf(
+            dl(item("d1", "我不是大师", episodeName = "第11集"), DownloadTaskState.COMPLETED)
+        )
+        // 选集面板传的是搜索/详情页原始标题（带标记），存的是清洗后的剧名。
+        val statuses = OfflineLibrary.episodeStatuses(downloads, "我不是大师[全集]")
+        assertEquals(DownloadTaskState.COMPLETED, statuses[11])
+    }
+
     // ==================== episodeStatuses：选集网格防重复聚合 ====================
 
     private fun resolvingItem(id: String, title: String, detailUrl: String, index: Int) = OfflineItem(
