@@ -98,6 +98,7 @@ private fun PlayerApp(activity: ComponentActivity) {
     val allowMobileData by downloadsVm.allowMobileData.collectAsStateWithLifecycle()
     val sourcesState by sourcesVm.state.collectAsStateWithLifecycle()
     val sheetState by sheetVm.state.collectAsStateWithLifecycle()
+    val playerCursor by playerVm.cursor.collectAsStateWithLifecycle()
 
     // 最近浏览一出现就静默预取作品卡入缓存：点大卡/最近条目时秒进详情页，不等搜索。
     LaunchedEffect(homeState.recent) { homeVm.prefetchRecentVods(homeState.recent) }
@@ -412,12 +413,12 @@ private fun PlayerApp(activity: ComponentActivity) {
                 onDismissProbe = { sourcesVm.dismissProbe() }
             )
             Page.PLAYER -> {
-                val entry = playerVm.currentEntry()
+                val entry = playerCursor.currentEntry
                 if (entry != null) {
                     VideoPlayerScreen(
                         entry = entry,
-                        hasPrev = playerVm.hasPrev(),
-                        hasNext = playerVm.hasNext(),
+                        hasPrev = playerCursor.hasPrev,
+                        hasNext = playerCursor.hasNext,
                         onBack = ::goBack,
                         onPrev = { playerVm.prev() },
                         onNext = { playerVm.next() },

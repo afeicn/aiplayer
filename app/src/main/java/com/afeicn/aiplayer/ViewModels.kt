@@ -946,50 +946,103 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
 
 // ==================== 播放器 ====================
 
+/**
+ * 播放队列的不可变快照。UI 只观察它，不再直接读取 ViewModel 的普通字段：
+ * 普通 var 的变化不会触发 Compose 重组，切集后标题和「上一集/下一集」会停在旧状态。
+ *
+ * @param position 当前集在队列中的下标；没有有效条目时为 -1。
+ */
+data class PlayerCursor(
+    val currentEntry: MediaEntry?,
+    val hasPrev: Boolean,
+    val hasNext: Boolean,
+    val queueSize: Int,
+    val position: Int
+)
+
+/**
+ * 游标边界规则。抽成不依赖 Android / ExoPlayer 的纯函数，JVM 单测可直接覆盖所有边界。
+ * 空队列下无论 index 取什么值，都不存在上一集/下一集。
+ */
+internal object PlayerCursorRules {
+
+    fun hasPrev(index: Int, queueSize: Int): Boolean =
+        index > 0 && index < queueSize
+
+    fun hasNext(index: Int, queueSize: Int): Boolean =
+        index >= 0 && index < queueSize - 1
+
+    fun position(index: Int, queueSize: Int): Int =
+        if (index in 0 until queueSize) index else -1
+
+    fun cursor(index: Int, queue: List<MediaEntry>): PlayerCursor = PlayerCursor(
+        currentEntry = queue.getOrNull(index),
+        hasPrev = hasPrev(index, queue.size),
+        hasNext = hasNext(index, queue.size),
+        queueSize = queue.size,
+        position = position(index, queue.size)
+    )
+}
+
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 当前播放队列（离线整剧 / 在线整条线路）与游标；单条播放就是长度为 1 的队列。 */
     private var queue: List<MediaEntry> = emptyList()
     private var index: Int = -1
 
-    /** 当前正在播的条目（null 表示没有播放会话）。 */
-    fun currentEntry(): MediaEntry? = queue.getOrNull(index)
+    private val _cursor = MutableStateFlow(PlayerCursorRules.cursor(index, queue))
 
-    fun hasNext(): Boolean = index in queue.indices && index < queue.lastIndex
-    fun hasPrev(): Boolean = index > 0
+    /** 播放会话的唯一可观察状态；play/playQueue/next/prev/清空后都会发布新快照。 */
+    val cursor: StateFlow<PlayerCursor> = _cursor.asStateFlow()
+
+    /** 当前正在播的条目（null 表示没有播放会话）。 */
+    fun currentEntry(): MediaEntry? = _cursor.value.currentEntry
+
+    fun hasNext(): Boolean = _cursor.value.hasNext
+    fun hasPrev(): Boolean = _cursor.value.hasPrev
 
     /** 起播一条媒体（在线流 offlineOnly=false；离线缓存条目 offlineOnly=true 断网可播）。 */
     fun play(entry: MediaEntry) {
+        saveProgress()
         queue = listOf(entry)
         index = 0
+        publishCursor()
         startCurrent()
     }
 
     /** 起播一个队列（离线剧全部已下载集 / 在线作品一条线路的全部集）。 */
     fun playQueue(entries: List<MediaEntry>, startIndex: Int) {
         if (entries.isEmpty()) return
+        saveProgress()
         queue = entries
         index = startIndex.coerceIn(0, entries.lastIndex)
+        publishCursor()
         startCurrent()
     }
 
     fun next() {
-        if (hasNext()) {
-            index++
-            startCurrent()
-        }
+        if (!hasNext()) return
+        saveProgress()
+        index++
+        publishCursor()
+        startCurrent()
     }
 
     fun prev() {
-        if (hasPrev()) {
-            index--
-            startCurrent()
-        }
+        if (!hasPrev()) return
+        saveProgress()
+        index--
+        publishCursor()
+        startCurrent()
+    }
+
+    private fun publishCursor() {
+        _cursor.value = PlayerCursorRules.cursor(index, queue)
     }
 
     private fun startCurrent() {
-        saveProgress()
-        val entry = queue[index]
+        // 队列可能被外部替换/清空，越界时安全退出而不是让 queue[index] 崩溃。
+        val entry = queue.getOrNull(index) ?: return
         val player = PlayerEngine.player(AppContainer.appContext)
         player.setMediaItem(entry.toMediaItem())
         player.seekTo(AppContainer.playbackProgress.positionOf(entry.uri.toString()))
@@ -1015,6 +1068,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         PlayerEngine.release()
         queue = emptyList()
         index = -1
+        publishCursor()
     }
 }
 

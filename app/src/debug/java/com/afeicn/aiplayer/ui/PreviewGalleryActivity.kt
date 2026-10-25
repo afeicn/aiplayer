@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,10 +24,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import com.afeicn.aiplayer.MediaEntry
 import com.afeicn.aiplayer.MediaKind
 import com.afeicn.aiplayer.PlayerEngine
+import com.afeicn.aiplayer.PlayerViewModel
+import java.io.File
 
 /**
  * 仅 debug 包可用的截图画廊：用 ScreenPreviews 的假数据把各页面独立渲染出来。
@@ -36,6 +41,10 @@ import com.afeicn.aiplayer.PlayerEngine
  * 用法：adb shell am start -n com.afeicn.aiplayer/.ui.PreviewGalleryActivity --es screen home
  */
 class PreviewGalleryActivity : ComponentActivity() {
+
+    /** 复现「上一集/下一集」状态用：和 MainActivity 一样持有真实的 PlayerViewModel。 */
+    private val playerVm: PlayerViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -43,19 +52,34 @@ class PreviewGalleryActivity : ComponentActivity() {
         // 可选：传入本地视频地址，播放页就能拿到真实 duration（拖动预览需要）。
         val media = intent.getStringExtra("media")
         // 播放页必须横屏；其余保持竖屏。
-        if (screen == "player") {
+        if (screen == "player" || screen == "player-queue") {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        if (screen == "player-queue") {
+            val start = intent.getIntExtra("start", 0)
+            playerVm.playQueue(demoQueue(), startIndex = start)
         }
         setContent {
             AIPlayerTheme {
-                GalleryScreen(screen, media)
+                GalleryScreen(screen, media, playerVm)
             }
+        }
+    }
+
+    /** 三条同源但标题不同的队列，仅用于验证切集后的按钮/标题是否刷新。 */
+    private fun demoQueue(): List<MediaEntry> {
+        val uri = Uri.fromFile(File(filesDir, "sample.mp4"))
+        return (1..3).map { i ->
+            MediaEntry(
+                uri = uri, name = "队列测试", kind = MediaKind.VIDEO,
+                folder = "本地", extension = "mp4", title = "第 $i 集"
+            )
         }
     }
 }
 
 @Composable
-private fun GalleryScreen(screen: String, media: String?) {
+private fun GalleryScreen(screen: String, media: String?, playerVm: PlayerViewModel) {
     when (screen) {
         "home" -> SoftPage {
             HomeScreen(previewHomeState, onSearch = {}, onDownloads = {}, onSources = {},
@@ -127,6 +151,21 @@ private fun GalleryScreen(screen: String, media: String?) {
         }
 
         "player" -> PlayerGalleryScreen(media)
+
+        // 回归用：验证切集后标题与「上一集/下一集」是否随真实游标刷新。
+        "player-queue" -> {
+            val cursor by playerVm.cursor.collectAsStateWithLifecycle()
+            val entry = cursor.currentEntry
+            if (entry != null) {
+                VideoPlayerScreen(
+                    entry = entry,
+                    hasPrev = cursor.hasPrev,
+                    hasNext = cursor.hasNext,
+                    onBack = {}, onPrev = { playerVm.prev() }, onNext = { playerVm.next() },
+                    onEpisodes = {}, onSaveProgress = {}
+                )
+            }
+        }
 
         else -> SoftPage {
             Text("未知页面：$screen", modifier = Modifier.align(Alignment.Center))
