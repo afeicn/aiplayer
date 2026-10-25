@@ -562,12 +562,12 @@ fun DetailScreen(
     onEpisodePlay: (Int) -> Unit,
     onSelectEpisodes: () -> Unit
 ) {
-    // 简介：下载记录没存简介，凭详情页地址懒抓一次；抓到才显示，失败/为空整块不出现。
-    var blurb by remember(series.title) { mutableStateOf("") }
+    // 简介：优先读下载记录落库的 blurb（下载/自愈时提取）；没有才凭详情页地址懒抓一次，失败/为空整块不出现。
+    var blurb by remember(series.title) { mutableStateOf(series.blurb) }
     var blurbExpanded by remember(series.title) { mutableStateOf(false) }
     LaunchedEffect(series.title) {
         val url = series.detailUrl
-        if (url.isNotBlank()) {
+        if (blurb.isBlank() && url.isNotBlank()) {
             blurb = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { VodBlurbParser.extract(HttpPageFetcher().fetch(url, null).body) }.getOrDefault("")
             }
