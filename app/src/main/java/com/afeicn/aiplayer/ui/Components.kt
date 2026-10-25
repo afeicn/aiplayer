@@ -46,6 +46,49 @@ import com.afeicn.aiplayer.R
 val cardShape = RoundedCornerShape(18.dp)
 val heroShape = RoundedCornerShape(26.dp)
 
+/**
+ * 主题化 Snackbar：替代 Material 默认深色条，与底部胶囊导航同一套语言——
+ * 白色悬浮胶囊、细描边、紫点标记、紫色动作按钮。所有 Snackbar 统一走这里。
+ */
+@Composable
+fun ThemedSnackbar(data: SnackbarData, modifier: Modifier = Modifier) {
+    val palette = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier.padding(horizontal = 24.dp),
+        shape = RoundedCornerShape(100.dp),
+        color = palette.surface.copy(alpha = .97f),
+        contentColor = palette.onSurface,
+        border = BorderStroke(.5.dp, palette.outline.copy(alpha = .4f)),
+        shadowElevation = 10.dp,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, top = 10.dp, bottom = 10.dp,
+                end = if (data.visuals.actionLabel != null) 4.dp else 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(Modifier.size(7.dp).clip(CircleShape).background(Ink.Violet))
+            Text(
+                data.visuals.message,
+                fontSize = 14.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            data.visuals.actionLabel?.let { label ->
+                TextButton(
+                    onClick = { data.performAction() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = palette.primary),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SoftPage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     // 纯色底：此前底部渐变 + 漂移光晕在浅紫底上叠出灰紫色雾块，白色卡片像蒙了层脏底，已整体移除。

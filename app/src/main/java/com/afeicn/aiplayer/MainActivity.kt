@@ -421,7 +421,7 @@ private fun PlayerApp(activity: ComponentActivity) {
             hostState = snackbar,
             modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
                 .navigationBarsPadding().padding(bottom = if (page in setOf(Page.HOME, Page.DISCOVER)) 82.dp else 12.dp)
-        )
+        ) { data -> ThemedSnackbar(data) }
     }
 
     if (sheetTarget != null) {
