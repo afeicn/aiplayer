@@ -28,7 +28,7 @@
 |:---:|:---:|:---:|
 | <img src="docs/screens/detail.png" width="200"> | <img src="docs/screens/downloads.png" width="200"> | <img src="docs/screens/player.png" width="340"> |
 
-> 截图中的海报与片名均已打码处理；本仓库不内置任何视频源，源列表初始为空。
+> 截图中的剧集、海报与简介均为**完全虚构的演示内容**（剧名经联网查重，不存在同名作品）；本仓库不内置任何视频源，源列表初始为空。
 
 ## 构建
 
