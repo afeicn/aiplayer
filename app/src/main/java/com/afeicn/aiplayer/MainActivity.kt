@@ -197,11 +197,15 @@ private fun PlayerApp(activity: ComponentActivity) {
     fun openPlayer(entry: MediaEntry, sheet: SheetTarget?, playUrl: String = "") {
         openPlayer(listOf(entry), 0, sheet, playUrl)
     }
-    /** 离线剧的播放队列：全部已下载集；起点取有断点记录的那一集，否则第一集。 */
+    /** 离线剧的播放队列：全部已下载集；起点按「上次播到第几集」记录，其次断点记录，否则第一集。 */
     fun offlineQueue(series: DownloadedSeries): Pair<List<MediaEntry>, Int> {
         val entries = series.episodes.map { it.mediaEntry() }
-        val start = entries.indexOfFirst { AppContainer.playbackProgress.positionOf(it.uri.toString()) > 0 }
-            .coerceAtLeast(0)
+        val store = AppContainer.playbackProgress
+        val start = PlaybackProgressRules.offlineResumeIndex(
+            episodeNumbers = entries.map { it.episodeNumber },
+            lastEpisode = store.validatedLastEpisodeOf(series.title, series.totalEpisodes),
+            positions = entries.map { store.positionOf(it.uri.toString()) }
+        )
         return entries to start
     }
     fun goBack() {
