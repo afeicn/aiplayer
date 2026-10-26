@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Player — 免费开源的 Android 视频播放器</title>
-<meta name="description" content="AI Player：免费开源的 Android 视频播放器。跨源订阅搜索、离线下载、秒开缓存播放。零遥测、零广告、417 个单元测试。AGPL-3.0。">
+<meta name="description" content="AI Player：免费开源的 Android 视频播放器。跨源订阅搜索、离线下载、秒开缓存播放，可选接入 DeepSeek 大模型做幕后解析。零遥测、零广告、482 个单元测试。AGPL-3.0。">
 <meta property="og:title" content="AI Player — 免费开源的 Android 视频播放器">
 <meta property="og:description" content="跨源搜索 · 离线下载 · 秒开缓存。零遥测、零广告、417 个单元测试。">
 <meta property="og:type" content="website">
@@ -134,7 +134,7 @@ footer .links{margin-left:auto;display:flex;gap:18px}
   <div class="wrap">
     <div>
       <h1>先存下来，<br>随时能看。</h1>
-      <p class="sub">AI Player 是一个免费开源的 Android 视频播放器：跨源订阅搜索、离线下载、秒开缓存播放。不内置任何视频源，所有数据留在你的设备上。</p>
+      <p class="sub">AI Player 是一个免费开源的 Android 视频播放器：跨源订阅搜索、离线下载、秒开缓存播放，可选接入大模型让解析更省心。不内置任何视频源，所有数据留在你的设备上。</p>
       <div class="cta">
         <a class="btn" href="https://github.com/afeicn/aiplayer/releases/latest">下载 APK</a>
         <a class="btn ghost" href="https://github.com/afeicn/aiplayer">在 GitHub 上查看</a>
@@ -149,7 +149,7 @@ footer .links{margin-left:auto;display:flex;gap:18px}
 
 <div class="stats">
   <div class="wrap">
-    <div class="stat violet"><b>417</b><span>个 JVM 单元测试</span></div>
+    <div class="stat violet"><b>482</b><span>个 JVM 单元测试</span></div>
     <div class="stat"><b>0</b><span>遥测与统计 SDK</span></div>
     <div class="stat"><b>0</b><span>广告</span></div>
     <div class="stat"><b>AGPL-3.0</b><span>自由且保持开源</span></div>
@@ -166,6 +166,14 @@ footer .links{margin-left:auto;display:flex;gap:18px}
       <div class="shot"><img src="screens/player.png" alt="横屏播放器：进度条、选集、倍速与离线标记"></div>
     </div>
 
+    <div class="feature-big" style="margin-top:56px">
+      <div class="shot"><img src="screens/detail.png" alt="剧集详情：剧情简介与选集列表"></div>
+      <div>
+        <h2>大模型，藏在幕后</h2>
+        <p class="lead">名字里的 AI 不是噱头：在设置里填入你自己的 DeepSeek API Key（默认关闭，密钥只存本机），大模型会在幕后接管难啃的站点——找搜索入口、给站点起名字、提取搜索结果与集数，把「解析失败」变成「照常能用」。它不生成内容，也不替你决定看什么。</p>
+      </div>
+    </div>
+
     <div class="grid">
       <div class="cell">
         <div class="thumb"><img src="screens/search.png" alt="跨源搜索结果，同名作品聚合标注源数"></div>
@@ -180,7 +188,7 @@ footer .links{margin-left:auto;display:flex;gap:18px}
       <div class="cell">
         <div class="thumb"><img src="screens/discover.png" alt="发现页：搜索历史、热门搜索与推荐"></div>
         <h3>细节见真章</h3>
-        <p>海报共享元素转场、控制层淡入淡出；跟随系统「移除动画」设置。417 个单元测试覆盖解析、聚合与下载状态机，CI 每次提交全量验证。</p>
+        <p>海报共享元素转场、控制层淡入淡出；跟随系统「移除动画」设置。482 个单元测试覆盖解析、聚合与下载状态机，CI 每次提交全量验证。</p>
       </div>
     </div>
   </div>

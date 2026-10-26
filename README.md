@@ -1,8 +1,8 @@
 # AI Player
 
-一个**免费、开源**的 Android 视频播放器：自带离线下载与播放缓存、跨源订阅搜索、横屏手势播放器，全部数据留在你的设备上。
+一个**免费、开源**的 Android 视频播放器：自带离线下载与播放缓存、跨源订阅搜索、横屏手势播放器，可选接入大模型让解析更省心，全部数据留在你的设备上。
 
-**零遥测 · 零广告 · 417 个单元测试**
+**零遥测 · 零广告 · 482 个单元测试**
 
 ## ⚠️ 使用前必读
 
@@ -14,9 +14,9 @@
 - **离线下载**：基于 Media3 `DownloadManager`，SQLite 索引，杀进程后自动恢复；选集批量下载（多选 / 范围 `2-8` / 离散 `3,5`）、暂停续传、失败分类重试、WiFi/移动数据网络闸门、磁盘空间预判。
 - **播放缓存秒开**：在线播放顺手写入离线缓存（命中不重复下载）；剧集详情页本地缓存，点击即开。
 - **横屏播放器**：倍速、选集、前后 10 秒、断点续播、离线只读缓存模式。
-- **LLM 兜底解析（可选）**：站点结构解析失败时，可用 DeepSeek 从页面 HTML 中提取搜索结果与集数——需要你自带 API Key，默认关闭。
+- **大模型辅助（可选）**：名字里的 AI 落在实处——在设置里配置你自己的 DeepSeek API Key 后，大模型会在幕后接管难啃的站点：找搜索入口、给站点命名、提取搜索结果与集数，把「解析失败」变成「照常能用」。默认关闭，密钥只存本机，不生成任何内容。
 - **动效设计**：海报共享元素转场、控制层淡入淡出、列表补位动画；尊重系统「移除动画」设置。
-- **工程质量**：417 个 JVM 单元测试（解析、聚合、下载状态机等核心逻辑不依赖设备即可验证）；CI 每次提交全量构建 + 测试。
+- **工程质量**：482 个 JVM 单元测试（解析、聚合、下载状态机等核心逻辑不依赖设备即可验证）；CI 每次提交全量构建 + 测试。
 
 ## 截图
 
@@ -68,8 +68,8 @@ AGPL-3.0-only · Copyright © 2026 AI Player Project contributors
 
 ## English
 
-**AI Player** is a free, open-source Android video player with built-in offline downloading, playback caching, and multi-source subscription search. Zero telemetry, zero ads, 417 unit tests.
+**AI Player** is a free, open-source Android video player with built-in offline downloading, playback caching, and multi-source subscription search. Zero telemetry, zero ads, 482 unit tests.
 
-The repository ships **no video sources** — the source list starts empty and you add your own sites at your own legal risk. The player framework supports MacCMS-style APIs, Empire CMS, and generic HTML sites, with automatic search-rule probing. Optional LLM-assisted page extraction (DeepSeek, bring your own key, off by default).
+The repository ships **no video sources** — the source list starts empty and you add your own sites at your own legal risk. The player framework supports MacCMS-style APIs, Empire CMS, and generic HTML sites, with automatic search-rule probing. The "AI" in the name is understated on purpose: bring your own DeepSeek API key (off by default, stored only on-device) and a large language model works behind the scenes — probing search entries, naming sites, extracting results and episode lists — turning "parse failed" into "just works". It generates no content and never decides what you watch.
 
 Build with JDK 17 + Android SDK: `./gradlew :app:assembleDebug`. Licensed under AGPL-3.0-only.
