@@ -171,7 +171,10 @@ fun DiscoverNoResultPreview() {
 @Composable
 fun OfflineDetailPreview() {
     AIPlayerTheme {
-        DetailScreen(previewSeries("三体", 6), onBack = {}, onPlay = {}, onEpisodePlay = {}, onSelectEpisodes = {})
+        DetailScreen(
+            previewSeries("三体", 6), onBack = {}, onPlay = {}, onEpisodePlay = {}, onSelectEpisodes = {},
+            lastEpisode = 4
+        )
     }
 }
 

@@ -560,7 +560,9 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPlay: () -> Unit,
     onEpisodePlay: (Int) -> Unit,
-    onSelectEpisodes: () -> Unit
+    onSelectEpisodes: () -> Unit,
+    // 上次播到的集号（0 = 没有记录）：网格里把这一集用主色实底标出来。
+    lastEpisode: Int = 0
 ) {
     // 简介：优先读下载记录落库的 blurb（下载/自愈时提取）；没有才凭详情页地址懒抓一次，失败/为空整块不出现。
     var blurb by remember(series.title) { mutableStateOf(series.blurb) }
@@ -590,7 +592,23 @@ fun DetailScreen(
                     SecondaryPill(ContinueDownloadRules.LABEL, Icons.Default.FileDownload, onSelectEpisodes, Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("已下载剧集", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("已下载剧集", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    if (lastEpisode > 0) {
+                        Spacer(Modifier.weight(1f))
+                        val marked = series.episodes.any { it.episodeNumber == lastEpisode }
+                        Box(
+                            Modifier.size(7.dp).clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (marked) "上次看到第 $lastEpisode 集" else "上次看到第 $lastEpisode 集 · 未下载",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
         item {
@@ -599,9 +617,14 @@ fun DetailScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { episode ->
                             val position = series.episodes.indexOf(episode)
+                            val watched = lastEpisode > 0 && episode.episodeNumber == lastEpisode
                             Surface(
                                 onClick = { onEpisodePlay(position) }, modifier = Modifier.weight(1f).height(42.dp),
-                                shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant
+                                shape = CircleShape,
+                                color = if (watched) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (watched) MaterialTheme.colorScheme.onPrimary
+                                               else MaterialTheme.colorScheme.onSurfaceVariant
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(

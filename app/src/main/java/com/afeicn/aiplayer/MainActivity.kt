@@ -377,6 +377,9 @@ private fun PlayerApp(activity: ComponentActivity) {
                 is DetailTarget.Offline -> DetailScreen(
                     series = target.series,
                     onBack = ::goBack,
+                    // 与「继续播放」同源：被记录的总集数校验过，避免脏集号标错集。
+                    lastEpisode = AppContainer.playbackProgress
+                        .validatedLastEpisodeOf(target.series.title, target.series.totalEpisodes),
                     onPlay = {
                         val (entries, start) = offlineQueue(target.series)
                         openPlayer(entries, start, SheetTarget.Continue(target.series))
