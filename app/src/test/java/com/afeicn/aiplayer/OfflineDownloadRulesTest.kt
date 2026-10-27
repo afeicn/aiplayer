@@ -131,6 +131,83 @@ class OfflineDownloadRulesTest {
         )
     }
 
+    // ==================== 网络闸门自动暂停/恢复 ====================
+
+    @Test
+    fun networkGateResumesOnlyTasksPausedByNetwork() {
+        // 回到 WiFi：等待网络/等待 WiFi 的任务恢复。
+        assertEquals(
+            Download.STOP_REASON_NONE,
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_WAITING_NETWORK, allowed = true
+            )
+        )
+        assertEquals(
+            Download.STOP_REASON_NONE,
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_WAITING_WIFI, allowed = true
+            )
+        )
+        // 用户手动暂停不因网络恢复而自动开始；已在跑的任务也不动。
+        assertNull(
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_PAUSED, allowed = true
+            )
+        )
+        assertNull(
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_DOWNLOADING, Download.STOP_REASON_NONE, allowed = true
+            )
+        )
+    }
+
+    @Test
+    fun networkGatePausesRunningAndQueuedTasksWhenBlocked() {
+        assertEquals(
+            OfflineDownloadRules.STOP_REASON_WAITING_WIFI,
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_DOWNLOADING, Download.STOP_REASON_NONE, allowed = false
+            )
+        )
+        assertEquals(
+            OfflineDownloadRules.STOP_REASON_WAITING_WIFI,
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_RESTARTING, Download.STOP_REASON_NONE, allowed = false
+            )
+        )
+        assertEquals(
+            OfflineDownloadRules.STOP_REASON_WAITING_NETWORK,
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_QUEUED, Download.STOP_REASON_NONE, allowed = false
+            )
+        )
+        // 已在等待中、手动暂停的任务保持原状，重复重估不应反复改停因。
+        assertNull(
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_WAITING_WIFI, allowed = false
+            )
+        )
+        assertNull(
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_PAUSED, allowed = false
+            )
+        )
+    }
+
+    /** 闸门重估是幂等的：第一次恢复后，再用同一网络状态重估不应再产生动作。 */
+    @Test
+    fun networkGateResumeIsIdempotent() {
+        val first = OfflineDownloadRules.networkGateStopReason(
+            Download.STATE_STOPPED, OfflineDownloadRules.STOP_REASON_WAITING_NETWORK, allowed = true
+        )
+        assertEquals(Download.STOP_REASON_NONE, first)
+        assertNull(
+            OfflineDownloadRules.networkGateStopReason(
+                Download.STATE_STOPPED, first!!, allowed = true
+            )
+        )
+    }
+
     // ==================== 失败原因分类 ====================
 
     @Test

@@ -85,7 +85,12 @@ object OfflineDownloadManager {
         val downloaderFactory = OfflineDownloaderFactory(ctx, simpleCache, localStore)
         val dm = DownloadManager(ctx, localIndex, downloaderFactory)
         dm.addListener(object : DownloadManager.Listener {
-            override fun onInitialized(downloadManager: DownloadManager) = refresh()
+            override fun onInitialized(downloadManager: DownloadManager) {
+                // DownloadManager 是异步初始化的：构造完立刻 applyNetworkGate 时还读不到既有任务，
+                // 上次遗留的「等待网络/等待 WiFi」任务会一直停着。初始化完成后再重估一次。
+                applyNetworkGate()
+                refresh()
+            }
             override fun onDownloadChanged(downloadManager: DownloadManager, download: Download, finalException: Exception?) {
                 if (finalException != null) failureByDownloadId[download.request.id] = finalException
                 else failureByDownloadId.remove(download.request.id)
@@ -380,30 +385,22 @@ object OfflineDownloadManager {
     private fun applyNetworkGate() {
         val dm = manager ?: return
         val allowed = DownloadNetworkGate.isAllowed(NetworkStatusMonitor.currentKind(), prefs?.allowMobileData() ?: false)
-        if (allowed) {
-            dm.currentDownloads.forEach { download ->
-                if (download.stopReason == OfflineDownloadRules.STOP_REASON_WAITING_NETWORK ||
-                    download.stopReason == OfflineDownloadRules.STOP_REASON_WAITING_WIFI
-                ) {
-                    dm.setStopReason(download.request.id, Download.STOP_REASON_NONE)
-                }
-            }
-        } else {
-            dm.currentDownloads.forEach { download ->
-                when {
-                    download.state == Download.STATE_DOWNLOADING || download.state == Download.STATE_RESTARTING -> {
-                        if (download.stopReason == Download.STOP_REASON_NONE) {
-                            dm.setStopReason(download.request.id, OfflineDownloadRules.STOP_REASON_WAITING_WIFI)
-                        }
-                    }
-                    download.state == Download.STATE_QUEUED -> {
-                        if (download.stopReason == Download.STOP_REASON_NONE) {
-                            dm.setStopReason(download.request.id, OfflineDownloadRules.STOP_REASON_WAITING_NETWORK)
-                        }
-                    }
-                }
-            }
+        dm.currentDownloads.forEach { download ->
+            OfflineDownloadRules.networkGateStopReason(download.state, download.stopReason, allowed)
+                ?.let { stopReason -> dm.setStopReason(download.request.id, stopReason) }
         }
+    }
+
+    /**
+     * 回到前台时补一次网络重估：厂家省电策略下默认网络回调可能延迟或漏发，
+     * 用户从后台切回来时按当前网络立即恢复/暂停等待中的任务。
+     */
+    fun onAppForeground(context: Context) {
+        ensureInitialized(context)
+        // 已启动时只重读 activeNetwork，不重复注册回调。
+        NetworkStatusMonitor.start(context)
+        applyNetworkGate()
+        refresh()
     }
 
     private fun doRefresh() {

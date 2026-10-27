@@ -16,7 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * - WiFi / 以太网等非计费网络归为 [NetworkKind.WIFI]；
  * - 移动数据归为 [NetworkKind.CELLULAR]；
  * - 没有网络归为 [NetworkKind.NONE]。
- * 由 [OfflineDownloadManager] 在初始化时启动，网络变化时触发下载队列自动暂停/恢复。
+ * 由 [OfflineDownloadManager] 在初始化时启动，网络变化时触发下载队列自动暂停/恢复；
+ * 每次回到前台还会补一次重读，兜住厂家省电策略下可能漏发的回调。
  */
 
 /** 「允许移动数据下载」偏好（默认关闭）。 */
@@ -85,6 +86,10 @@ object NetworkStatusMonitor {
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkKind.WIFI
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkKind.WIFI
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> NetworkKind.CELLULAR
+            // VPN 等网络不暴露底层传输方式，但会带上「不计费」能力：按 WiFi 处理。
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) -> NetworkKind.WIFI
+            // 其余未知传输但有互联网（如蓝牙共享）：按计费网络保守处理，跟移动数据共用开关。
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> NetworkKind.CELLULAR
             else -> NetworkKind.NONE
         }
     }

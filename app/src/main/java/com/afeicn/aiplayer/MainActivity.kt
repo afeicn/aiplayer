@@ -83,8 +83,12 @@ private fun PlayerApp(activity: ComponentActivity) {
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP && PlayerEngine.isActive()) {
-                playerVm.pause()
+            when (event) {
+                // 前台补一次网络重估：连上 WiFi 后等待中的下载立刻续传。
+                androidx.lifecycle.Lifecycle.Event.ON_START -> downloadsVm.onAppForeground()
+                androidx.lifecycle.Lifecycle.Event.ON_STOP ->
+                    if (PlayerEngine.isActive()) playerVm.pause()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

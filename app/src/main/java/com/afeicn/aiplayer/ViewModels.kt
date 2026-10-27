@@ -441,6 +441,9 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
     fun pause(id: String) = OfflineDownloadManager.pause(AppContainer.appContext, id)
     fun resume(id: String) = OfflineDownloadManager.resume(AppContainer.appContext, id)
 
+    /** 应用回到前台：按当前网络重估下载闸门（WiFi 恢复后自动续传）。 */
+    fun onAppForeground() = OfflineDownloadManager.onAppForeground(AppContainer.appContext)
+
     /** 失败任务重试：「获取地址失败」的占位任务没有 Media3 记录，走重新解析；其余走 DownloadManager 重入队。 */
     fun retry(task: OfflineDownload) {
         if (task.failure == OfflineFailureReason.RESOLVE_FAILED) {

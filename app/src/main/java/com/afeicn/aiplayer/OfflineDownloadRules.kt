@@ -111,6 +111,23 @@ object OfflineDownloadRules {
         else -> DownloadTaskState.FAILED
     }
 
+    /**
+     * 网络闸门重估单条任务：返回要设置的新停因，null 表示保持不动。
+     *
+     * 放行时只恢复因网络被暂停的任务（不碰用户手动暂停）；拦截时只暂停还在排队/下载、
+     * 且尚未被设置停因的任务。纯函数，WiFi 恢复后的自动续传规则可直接单测。
+     */
+    fun networkGateStopReason(state: Int, stopReason: Int, allowed: Boolean): Int? = when {
+        allowed && (stopReason == STOP_REASON_WAITING_NETWORK || stopReason == STOP_REASON_WAITING_WIFI) ->
+            Download.STOP_REASON_NONE
+        !allowed && stopReason == Download.STOP_REASON_NONE &&
+            (state == Download.STATE_DOWNLOADING || state == Download.STATE_RESTARTING) ->
+            STOP_REASON_WAITING_WIFI
+        !allowed && stopReason == Download.STOP_REASON_NONE && state == Download.STATE_QUEUED ->
+            STOP_REASON_WAITING_NETWORK
+        else -> null
+    }
+
     /** 用户手动暂停（区别于网络闸门造成的等待）。 */
     const val STOP_REASON_PAUSED = 1
     /** 入队即被移动数据闸门拦下，等待网络（WiFi 或开启移动数据开关）。 */
