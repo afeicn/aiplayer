@@ -57,8 +57,14 @@ class PlaybackProgressStore(context: Context) {
         }
     })
 
-    fun savePosition(uri: String, positionMs: Long) {
-        if (positionMs > 5_000L) prefs.edit().putLong("pos:$uri", positionMs).apply()
+    /**
+     * 记一条续播位置。[synchronous] = true 时用 commit 落盘，给「马上可能被系统杀掉」的
+     * 时机用（onPause / onCleared）；平时走 apply，不阻塞主线程。
+     */
+    fun savePosition(uri: String, positionMs: Long, synchronous: Boolean = false) {
+        if (positionMs <= 5_000L) return
+        val editor = prefs.edit().putLong("pos:$uri", positionMs)
+        if (synchronous) editor.commit() else editor.apply()
     }
 
     fun positionOf(uri: String): Long = prefs.getLong("pos:$uri", 0L)

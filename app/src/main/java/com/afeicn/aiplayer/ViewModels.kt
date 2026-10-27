@@ -1104,10 +1104,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         return if (complete) index + 1 else null
     }
 
-    fun saveProgress() {
+    /**
+     * 存当前条目断点。[synchronous] = true 时同步写盘，用在可能紧接着被系统杀掉的时机
+     * （退到最近任务、Activity 销毁）；播放中的周期性兜底用默认的异步写。
+     */
+    fun saveProgress(synchronous: Boolean = false) {
         val entry = currentEntry() ?: return
-        val player = PlayerEngine.player(AppContainer.appContext)
-        AppContainer.playbackProgress.savePosition(entry.uri.toString(), player.currentPosition)
+        // 没有播放器实例就没有可存的位置，也不为存进度凭空创建一个。
+        val player = PlayerEngine.existing() ?: return
+        AppContainer.playbackProgress.savePosition(
+            entry.uri.toString(), player.currentPosition, synchronous
+        )
     }
 
     fun pause() {
@@ -1116,7 +1123,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        saveProgress()
+        saveProgress(synchronous = true)
         PlayerEngine.release()
         queue = emptyList()
         index = -1

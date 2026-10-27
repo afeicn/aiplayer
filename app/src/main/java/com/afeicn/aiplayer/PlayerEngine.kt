@@ -25,6 +25,12 @@ object PlayerEngine {
         player = null
     }
 
+    /**
+     * 已有实例才返回，没有就返回 null。
+     * 存进度这类操作不该为了读一个位置凭空创建播放器。
+     */
+    fun existing(): ExoPlayer? = player
+
     /** 是否已创建且在播：退后台静音前先问一句，不为暂停凭空创建实例。 */
     fun isActive(): Boolean = player?.isPlaying == true
 }

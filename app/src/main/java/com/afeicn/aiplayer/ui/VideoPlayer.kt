@@ -44,6 +44,7 @@ import com.afeicn.aiplayer.MediaEntry
 import com.afeicn.aiplayer.MediaKind
 import com.afeicn.aiplayer.PlayerEngine
 import com.afeicn.aiplayer.PlayerGestureRules
+import com.afeicn.aiplayer.ProgressSaveRules
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -123,6 +124,19 @@ fun VideoPlayerScreen(
     LaunchedEffect(playing, controlsVisible) {
         // 控制层显示 3 秒后自动隐藏（暂停态保持可见）。
         if (playing && controlsVisible) { delay(3000); controlsVisible = false }
+    }
+    // 播放中每 5 秒兜底存一次进度：用户直接划掉任务 / 系统强杀时，
+    // onPause、onStop 都可能来不及，最多也就丢这几秒。
+    LaunchedEffect(player, entry) {
+        var lastSaved = player.currentPosition
+        while (isActive) {
+            delay(ProgressSaveRules.INTERVAL_MS)
+            val now = player.currentPosition
+            if (ProgressSaveRules.shouldSave(lastSaved, now)) {
+                onSaveProgress()
+                lastSaved = now
+            }
+        }
     }
     DisposableEffect(entry) {
         onDispose { onSaveProgress() }

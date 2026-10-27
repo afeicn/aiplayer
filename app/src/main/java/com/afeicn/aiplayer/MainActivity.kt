@@ -86,6 +86,10 @@ private fun PlayerApp(activity: ComponentActivity) {
             when (event) {
                 // 前台补一次网络重估：连上 WiFi 后等待中的下载立刻续传。
                 androidx.lifecycle.Lifecycle.Event.ON_START -> downloadsVm.onAppForeground()
+                // 进最近任务 / 切走时先同步落盘：部分 ROM 在划掉任务时不再补发 onStop，
+                // 之前只靠 onStop 存，强杀后就会回到更早的断点。
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE ->
+                    playerVm.saveProgress(synchronous = true)
                 androidx.lifecycle.Lifecycle.Event.ON_STOP ->
                     if (PlayerEngine.isActive()) playerVm.pause()
                 else -> Unit
