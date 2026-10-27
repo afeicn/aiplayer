@@ -201,7 +201,7 @@ fun DownloadsScreenPreview() {
     AIPlayerTheme {
         DownloadsScreen(previewDownloads, pendingRemoval = emptySet(),
             cacheSizeText = "4.6 GB", onBack = {}, onSettings = {}, onPause = {}, onResume = {},
-            onRetry = {}, onDelete = {})
+            onRetry = {}, onDelete = {}, onOpen = {})
     }
 }
 

@@ -185,6 +185,19 @@ object OfflineLibrary {
             }
             .sortedBy { it.title.lowercase() }
 
+    /**
+     * 下载管理里点开某条已完成任务：返回它所属的整剧（只含已完成集，排序同 [groupByTitle]）
+     * 与这集在队列里的起点下标。同一集多源重复、被 [dedupe] 合并掉的记录点不到时，
+     * 退回「只播这一集」的队列（下标 0）。
+     */
+    fun playbackQueueFor(downloads: List<OfflineDownload>, downloadId: String): Pair<DownloadedSeries, Int>? {
+        val episode = completed(downloads).firstOrNull { it.item.id == downloadId }?.let(::toEpisode) ?: return null
+        val series = groupByTitle(episodes(downloads))
+            .firstOrNull { candidate -> candidate.episodes.any { it.id == downloadId } }
+            ?: groupByTitle(listOf(episode)).first()
+        return series to series.episodes.indexOfFirst { it.id == downloadId }.coerceAtLeast(0)
+    }
+
     /** 已下载 URL 集合（归一化 trim 后精确匹配，供「已下载」标记 / 判定）。 */
     fun downloadedUrls(downloads: List<OfflineDownload>): Set<String> =
         completed(downloads).map { it.item.url.trim() }.toSet()

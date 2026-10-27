@@ -999,7 +999,9 @@ fun DownloadsScreen(
     onPause: (String) -> Unit,
     onResume: (String) -> Unit,
     onRetry: (OfflineDownload) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    // 已完成任务点一下直接进播放页（队列取同剧已下载集，起点是这一集）。
+    onOpen: (OfflineDownload) -> Unit
 ) {
     var filter by remember { mutableIntStateOf(0) }
     val visibleAll = downloads.filterNot { it.item.id in pendingRemoval }
@@ -1036,6 +1038,7 @@ fun DownloadsScreen(
             }
             items(visible, key = { it.item.id }) { task ->
                 DownloadRow(task,
+                    onOpen = { onOpen(task) },
                     onPause = { onPause(task.item.id) },
                     onResume = { onResume(task.item.id) },
                     onRetry = { onRetry(task) },
@@ -1057,7 +1060,7 @@ fun DownloadsScreen(
 }
 
 @Composable
-private fun LazyItemScope.DownloadRow(task: OfflineDownload, onPause: () -> Unit, onResume: () -> Unit, onRetry: () -> Unit, onDelete: () -> Unit) {
+private fun LazyItemScope.DownloadRow(task: OfflineDownload, onOpen: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onRetry: () -> Unit, onDelete: () -> Unit) {
     val palette = MaterialTheme.colorScheme
     val motionOn = rememberMotionEnabled()
     val item = task.item
@@ -1075,7 +1078,13 @@ private fun LazyItemScope.DownloadRow(task: OfflineDownload, onPause: () -> Unit
         else -> palette.onSurfaceVariant
     }
     // animateItem：删除/完成时行收缩移出、下方补位，不瞬间消失。
-    Surface(modifier = Modifier.animateItem(), color = palette.surface, shape = cardShape, tonalElevation = 2.dp) {
+    // 只有已完成的任务可点进播放页；下载中/失败的行保持原来的纯展示行为。
+    val rowModifier = if (task.state == DownloadTaskState.COMPLETED) {
+        Modifier.animateItem().clickable { onOpen() }
+    } else {
+        Modifier.animateItem()
+    }
+    Surface(modifier = rowModifier, color = palette.surface, shape = cardShape, tonalElevation = 2.dp) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1098,6 +1107,11 @@ private fun LazyItemScope.DownloadRow(task: OfflineDownload, onPause: () -> Unit
                 }
                 if (OfflineAction.RETRY in actions) {
                     IconButton(onClick = onRetry) { Icon(Icons.Default.Refresh, "重试", tint = palette.primary) }
+                }
+                if (task.state == DownloadTaskState.COMPLETED) {
+                    IconButton(onClick = onOpen, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.PlayArrow, "播放", modifier = Modifier.size(18.dp), tint = palette.primary)
+                    }
                 }
                 if (OfflineAction.DELETE in actions) {
                     IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {

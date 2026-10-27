@@ -405,7 +405,14 @@ private fun PlayerApp(activity: ComponentActivity) {
                 onPause = { downloadsVm.pause(it) },
                 onResume = { downloadsVm.resume(it) },
                 onRetry = { downloadsVm.retry(it) },
-                onDelete = { downloadsVm.remove(it) }
+                onDelete = { downloadsVm.remove(it) },
+                // 点已完成任务：队列取同剧全部已下载集，从这一集起播；起播会顺带记下「上次看到第几集」。
+                onOpen = { task ->
+                    OfflineLibrary.playbackQueueFor(downloads, task.item.id)?.let { (series, index) ->
+                        val (entries, _) = offlineQueue(series)
+                        openPlayer(entries, index, SheetTarget.Continue(series))
+                    }
+                }
             )
             Page.SOURCES -> SourcesScreen(
                 state = sourcesState,

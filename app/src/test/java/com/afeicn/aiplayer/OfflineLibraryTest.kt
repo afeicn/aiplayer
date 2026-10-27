@@ -391,4 +391,50 @@ class OfflineLibraryTest {
         val series = OfflineLibrary.groupByTitle(OfflineLibrary.episodes(downloads)).first()
         assertEquals("共 36 集，第2季 下载到第 2 集", series.countLabel)
     }
+
+    // ==================== 下载管理点开播放 ====================
+
+    @Test
+    fun playbackQueueFor_取同剧已下载集并以点击集为起点() {
+        val downloads = listOf(
+            dl(item("1", "狂飙", episodeName = "第01集")),
+            dl(item("2", "狂飙", episodeName = "第02集")),
+            dl(item("3", "狂飙", episodeName = "第03集")),
+            // 下载中的任务不进播放队列。
+            dl(item("4", "狂飙", episodeName = "第04集"), DownloadTaskState.DOWNLOADING),
+            dl(item("5", "庆余年", episodeName = "第01集"))
+        )
+
+        val (series, index) = OfflineLibrary.playbackQueueFor(downloads, "2")!!
+
+        assertEquals("狂飙", series.title)
+        assertEquals(listOf("1", "2", "3"), series.episodes.map { it.id })
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun playbackQueueFor_未完成或已不存在的任务返回null() {
+        val downloads = listOf(
+            dl(item("1", "狂飙", episodeName = "第01集"), DownloadTaskState.DOWNLOADING),
+            dl(item("2", "狂飙", episodeName = "第02集"), DownloadTaskState.FAILED)
+        )
+        assertNull(OfflineLibrary.playbackQueueFor(downloads, "1"))
+        assertNull(OfflineLibrary.playbackQueueFor(downloads, "2"))
+        assertNull(OfflineLibrary.playbackQueueFor(downloads, "missing"))
+    }
+
+    @Test
+    fun playbackQueueFor_同集多源被去重时退回只播这一集() {
+        // 同一部剧同一集下载了两条（不同来源）：播放队列去重后只留第一条，
+        // 点第二条时不能在别人的队列里找错位置，退回「只播这一集」。
+        val downloads = listOf(
+            dl(item("a", "狂飙", url = "https://a/1.m3u8", episodeName = "第01集")),
+            dl(item("b", "狂飙", url = "https://b/1.m3u8", episodeName = "第01集"))
+        )
+
+        val (series, index) = OfflineLibrary.playbackQueueFor(downloads, "b")!!
+
+        assertEquals(0, index)
+        assertEquals(listOf("b"), series.episodes.map { it.id })
+    }
 }

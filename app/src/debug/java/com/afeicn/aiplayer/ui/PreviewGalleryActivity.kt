@@ -159,7 +159,7 @@ private fun GalleryScreen(
 
         "downloads" -> DownloadsScreen(previewDownloads, pendingRemoval = emptySet(),
             cacheSizeText = "4.6 GB", onBack = {}, onSettings = {}, onPause = {}, onResume = {},
-            onRetry = {}, onDelete = {})
+            onRetry = {}, onDelete = {}, onOpen = {})
 
         "sources" -> SourcesScreen(previewSourcesState, allowMobileData = false, onSetAllowMobileData = {},
             onBack = {}, onAdd = {}, onToggle = { _, _ -> },
