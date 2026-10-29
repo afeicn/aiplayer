@@ -14,6 +14,7 @@ object AppContainer {
     val sourceStore: OnlineSourceStore by lazy { OnlineSourceStore(appContext) }
     val searchHistory: SearchHistoryStore by lazy { SearchHistoryStore(appContext) }
     val searchEngine: OnlineSearchEngine by lazy { OnlineSearchEngine(sourceStore) }
+    val recommendationStore: RecommendationStore by lazy { RecommendationStore(appContext) }
     val episodeProgress: EpisodeProgressStore by lazy { EpisodeProgressStore(appContext) }
     val downloadPrefs: DownloadPreferences by lazy { DownloadPreferences(appContext) }
     val playbackProgress: PlaybackProgressStore by lazy { PlaybackProgressStore(appContext) }

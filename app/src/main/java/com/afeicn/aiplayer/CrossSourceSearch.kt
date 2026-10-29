@@ -320,16 +320,22 @@ data class CrossSearchOutcome(
  */
 object CrossSourceSearchEngine {
 
-    /** 并行搜启用源（跳过冷却期）；返回「没结果 vs 网络失败」可区分的逐源结果。 */
+    /**
+     * 并行搜启用源（跳过冷却期）；返回「没结果 vs 网络失败」可区分的逐源结果。
+     * [requireRule] = true 时只搜已经缓存了搜索规则的源：推荐流这类自动预取不该替用户
+     * 对没探测过的站跑一遍探测（抓首页 + 多个候选入口试搜），那是最容易被风控识别的大量请求。
+     */
     suspend fun search(
         store: SourceRegistry,
         keyword: String,
         transport: SearchTransport,
         now: Long = System.currentTimeMillis(),
-        aiFallback: AiSearchFallback? = null
+        aiFallback: AiSearchFallback? = null,
+        requireRule: Boolean = false
     ): List<CrossSearchOutcome> {
         val active = store.sources().filter { source ->
             source.enabled && source.normalizedBase.isNotBlank() &&
+                (!requireRule || source.searchRule != null) &&
                 !SourceHealthPolicy.isCoolingDown(store.health(source.id), now)
         }
         if (active.isEmpty()) return emptyList()

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 /**
  * 各页面的状态层：把迁移过来的业务模块（搜索引擎、下载管理、离线库）接到 Compose UI。
@@ -121,32 +122,63 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 进入发现页、还没有关键词时预取推荐流。
      *
-     * 用热搜榜前几条关键词各跑一次跨源搜索再合并，所以卡片上的封面、年份、「N 个源」都是真数据。
-     * 这里刻意不挂 AI 兜底：推荐是锦上添花，不值得为它花模型额度；用户主动搜索时才走兜底。
+     * 用随机抽的几条热搜关键词各跑一次跨源搜索再合并，所以卡片上的封面、年份、「N 个源」都是真数据。
+     * 订阅源多半有反爬/风控，这里按「尽量少打源」设计：
+     *  ① 推荐流落盘缓存 12 小时，TTL 内直接读盘、零网络；
+     *  ② 上次拉空后的 30 分钟内不再重试（不然每次切进发现页都重打一遍）；
+     *  ③ 只搜已缓存搜索规则的源，不替用户对没探测过的站跑探测；
+     *  ④ 关键词随机抽取、之间留 1–2 秒随机间隔，不打固定节奏的批量请求。
+     * 刻意不挂 AI 兜底：推荐是锦上添花，不值得为它花模型额度；用户主动搜索时才走兜底。
      */
     fun loadRecommendations() {
-        val enabled = AppContainer.sourceStore.sources().count { it.enabled }
-        if (!RecommendationRules.shouldPrefetch(enabled)) {
+        val sources = AppContainer.sourceStore.sources()
+        val prefetchable = sources.count { it.enabled && it.normalizedBase.isNotBlank() && it.searchRule != null }
+        if (!RecommendationRules.shouldPrefetch(prefetchable)) {
             recommendJob?.cancel()
             _state.value = _state.value.copy(
                 recommendations = emptyList(), recommendationsLoading = false,
-                noEnabledSources = enabled == 0
+                noEnabledSources = sources.none { it.enabled }
             )
             return
         }
         _state.value = _state.value.copy(noEnabledSources = false)
         if (_state.value.recommendationsLoading || _state.value.recommendations.isNotEmpty()) return
         recommendJob = viewModelScope.launch {
+            // ① 先读盘：TTL 内直接复用缓存，不碰任何订阅源。
+            val cached = withContext(Dispatchers.IO) {
+                AppContainer.recommendationStore.cached(System.currentTimeMillis()) { id ->
+                    sources.firstOrNull { it.id == id }
+                }
+            }
+            if (cached != null) {
+                _state.value = _state.value.copy(recommendations = cached, recommendationsLoading = false)
+                return@launch
+            }
+            // ② 上次拉空且还在冷却期：这次不重试。
+            val cooling = withContext(Dispatchers.IO) {
+                AppContainer.recommendationStore.inEmptyCooldown(System.currentTimeMillis())
+            }
+            if (cooling) return@launch
             _state.value = _state.value.copy(recommendationsLoading = true)
             val groups = withContext(Dispatchers.IO) {
-                HotSearchCatalog.prefetch().map { keyword ->
+                HotSearchCatalog.prefetch().mapIndexed { index, keyword ->
+                    // ④ 关键词之间留随机间隔，把批量请求拆散。
+                    if (index > 0) delay(1_000L + Random.nextLong(1_000L))
                     runCatching {
-                        VodAggregator.aggregate(AppContainer.searchEngine.search(keyword).hits)
+                        VodAggregator.aggregate(
+                            AppContainer.searchEngine.search(keyword, requireRule = true).hits
+                        )
                     }.getOrDefault(emptyList())
                 }
             }
+            val cards = RecommendationRules.merge(groups)
+            withContext(Dispatchers.IO) {
+                val now = System.currentTimeMillis()
+                if (cards.isEmpty()) AppContainer.recommendationStore.markEmptyAttempt(now)
+                else AppContainer.recommendationStore.save(cards, now)
+            }
             _state.value = _state.value.copy(
-                recommendations = RecommendationRules.merge(groups),
+                recommendations = cards,
                 recommendationsLoading = false
             )
         }

@@ -25,7 +25,12 @@ object HotSearchCatalog {
 
     fun display(): List<String> = keywords.take(DISPLAY_COUNT)
 
-    fun prefetch(): List<String> = keywords.take(PREFETCH_COUNT)
+    /**
+     * 预取的几个关键词：从榜单里随机抽，而不是固定前三条。
+     * 每台设备每次启动都打同一组词是站点风控最容易识别的指纹。
+     */
+    fun prefetch(random: kotlin.random.Random = kotlin.random.Random): List<String> =
+        keywords.shuffled(random).take(PREFETCH_COUNT)
 }
 
 object RecommendationRules {
@@ -35,6 +40,24 @@ object RecommendationRules {
 
     /** 没有启用中的源就不去白跑网络，UI 改显示引导。 */
     fun shouldPrefetch(enabledSources: Int): Boolean = enabledSources > 0
+
+    /** 推荐流缓存有效期：一天开几次 App 也只真实搜索一次（默认 12 小时）。 */
+    const val CACHE_TTL_MS = 12L * 60L * 60L * 1000L
+
+    /** 上次预取一条都没召回时的重试冷却（默认 30 分钟）。 */
+    const val EMPTY_COOLDOWN_MS = 30L * 60L * 1000L
+
+    /** 缓存是否还在有效期内（[savedAt] = 0 表示从没存过）。 */
+    fun cacheFresh(savedAt: Long, now: Long, ttl: Long = CACHE_TTL_MS): Boolean =
+        savedAt > 0 && now >= savedAt && now - savedAt < ttl
+
+    /** 上次预取是拉空（[lastCount] = 0）且还没过冷却期：不要再打源，等冷却结束。 */
+    fun inEmptyCooldown(
+        lastAttemptAt: Long,
+        lastCount: Int,
+        now: Long,
+        cooldown: Long = EMPTY_COOLDOWN_MS
+    ): Boolean = lastAttemptAt > 0 && lastCount == 0 && now >= lastAttemptAt && now - lastAttemptAt < cooldown
 
     /**
      * 把多个关键词各自的聚合结果合成一条推荐流。

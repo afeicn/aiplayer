@@ -167,4 +167,25 @@ class CrossSourceSearchTest {
         assertTrue(down.networkFailure)
         assertEquals(1, registry.health("h").consecutiveFailures)
     }
+
+    @Test
+    fun requireRuleSkipsSourcesWithoutCachedRule() = runBlocking {
+        val withRule = OnlineVideoSource(
+            id = "a", name = "源A", base = "https://a.com",
+            searchRule = SearchRule.manual("https://a.com/s?q={kw}")
+        )
+        val noRule = OnlineVideoSource(id = "b", name = "源B", base = "https://b.com")
+        val registry = MemoryRegistry().apply { put(withRule); put(noRule) }
+        val requested = mutableListOf<String>()
+        val transport = FakeTransport { req ->
+            requested += req.url
+            SearchHttpResponse(req.url, 200, body = html("流浪地球", "/a/1.html"))
+        }
+
+        val outcomes = CrossSourceSearchEngine.search(registry, "流浪地球", transport, requireRule = true)
+
+        // 没缓存规则的源被跳过：推荐预取不替用户跑探测（抓首页 + 多个候选入口试搜）。
+        assertEquals(listOf("a"), outcomes.map { it.source.id })
+        assertTrue(requested.none { it.startsWith("https://b.com") })
+    }
 }

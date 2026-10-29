@@ -209,9 +209,10 @@ class OnlineSearchEngine(private val store: OnlineSourceStore) {
     suspend fun search(
         keyword: String,
         now: Long = System.currentTimeMillis(),
-        aiFallback: AiSearchFallback? = null
+        aiFallback: AiSearchFallback? = null,
+        requireRule: Boolean = false
     ): SearchReport {
-        val raw = CrossSourceSearchEngine.search(store, keyword, HttpSearchTransport(), now, aiFallback)
+        val raw = CrossSourceSearchEngine.search(store, keyword, HttpSearchTransport(), now, aiFallback, requireRule)
         val outcomes = raw.map { outcome ->
             SourceSearchOutcome(
                 source = outcome.source,

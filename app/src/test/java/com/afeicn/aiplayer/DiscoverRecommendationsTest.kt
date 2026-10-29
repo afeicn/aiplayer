@@ -1,5 +1,6 @@
 package com.afeicn.aiplayer
 
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,7 +30,11 @@ class DiscoverRecommendationsTest {
         assertEquals(display.size, display.distinct().size)
         // 预取条数不能超过展示条数，否则首屏会为看不见的关键词去压源。
         assertTrue(HotSearchCatalog.PREFETCH_COUNT <= display.size)
-        assertEquals(display.take(HotSearchCatalog.PREFETCH_COUNT), HotSearchCatalog.prefetch())
+        // 预取从榜单里随机抽：条数固定、不重复、都在榜单内。
+        val prefetch = HotSearchCatalog.prefetch(Random(7))
+        assertEquals(HotSearchCatalog.PREFETCH_COUNT, prefetch.size)
+        assertEquals(prefetch.size, prefetch.distinct().size)
+        assertTrue(prefetch.all { it in display })
     }
 
     @Test
@@ -116,5 +121,65 @@ class DiscoverRecommendationsTest {
         assertTrue(RecommendationRules.matchByTitle(recs, "斗罗大陆 佩曦").isEmpty())
         assertTrue(RecommendationRules.matchByTitle(recs, "").isEmpty())
         assertTrue(RecommendationRules.matchByTitle(emptyList(), "斗罗大陆").isEmpty())
+    }
+
+    // ==================== 缓存与节流：别每次冷启动都打订阅源 ====================
+
+    @Test
+    fun cacheFreshOnlyWithinTtl() {
+        val now = 10_000_000L
+        assertFalse(RecommendationRules.cacheFresh(0L, now))
+        assertTrue(RecommendationRules.cacheFresh(now - 1_000L, now))
+        assertFalse(RecommendationRules.cacheFresh(now - RecommendationRules.CACHE_TTL_MS, now))
+        assertFalse(RecommendationRules.cacheFresh(now - RecommendationRules.CACHE_TTL_MS - 1, now))
+    }
+
+    @Test
+    fun emptyAttemptCoolsDownOnlyWhenLastFetchFoundNothing() {
+        val now = 10_000_000L
+        // 上次拉空且没过冷却期 → 不重试。
+        assertTrue(RecommendationRules.inEmptyCooldown(now - 1_000L, 0, now))
+        // 冷却结束 → 可以再试。
+        assertFalse(RecommendationRules.inEmptyCooldown(now - RecommendationRules.EMPTY_COOLDOWN_MS, 0, now))
+        // 上次有结果不叫冷却（复用由缓存 TTL 管）。
+        assertFalse(RecommendationRules.inEmptyCooldown(now - 1_000L, 3, now))
+        // 从没拉过。
+        assertFalse(RecommendationRules.inEmptyCooldown(0L, 0, now))
+    }
+
+    @Test
+    fun codecRoundTripKeepsCardAndHits() {
+        val original = listOf(
+            card("庆余年", pic = "https://p/a.jpg", year = "2024", sourceIds = arrayOf("s1", "s2"))
+        ).map { c ->
+            c.copy(
+                hits = c.hits.map {
+                    it.copy(
+                        item = it.item.copy(
+                            playGroups = listOf(VodPlayGroup("正片", listOf(VodPlayLine("第01集", "https://v/1.m3u8"))))
+                        ),
+                        detailUrl = "https://d/1.html"
+                    )
+                }
+            )
+        }
+
+        val decoded = RecommendationCodec.decode(RecommendationCodec.encode(original)) { id -> source(id) }
+
+        assertEquals(1, decoded.size)
+        assertEquals("庆余年", decoded[0].name)
+        assertEquals("https://p/a.jpg", decoded[0].pic)
+        assertEquals(2, decoded[0].sourceCount)
+        assertEquals("https://v/1.m3u8", decoded[0].hits.first().item.playGroups.single().lines.single().url)
+        assertEquals("https://d/1.html", decoded[0].hits.first().detailUrl)
+    }
+
+    @Test
+    fun codecDropsCardsWhoseSourcesAreGone() {
+        val cards = listOf(card("庆余年", sourceIds = arrayOf("s1")))
+
+        val decoded = RecommendationCodec.decode(RecommendationCodec.encode(cards)) { null }
+
+        assertTrue(decoded.isEmpty())
     }
 }
