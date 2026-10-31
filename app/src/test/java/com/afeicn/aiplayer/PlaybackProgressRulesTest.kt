@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackProgressRulesTest {
+    @Test fun positionKeyIsScopedToExactUri() {
+        assertEquals("pos:https://example.org/a.m3u8", PlaybackProgressRules.positionKey("https://example.org/a.m3u8"))
+        assertNotEquals(
+            PlaybackProgressRules.positionKey("https://example.org/a.m3u8"),
+            PlaybackProgressRules.positionKey("https://example.org/b.m3u8")
+        )
+    }
+
     @Test fun reopeningCurrentMediaUsesLiveBackgroundPosition() {
         assertEquals(139_000L, PlaybackProgressRules.resumePosition(true, 139_000, 120_000))
     }

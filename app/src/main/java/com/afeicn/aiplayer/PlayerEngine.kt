@@ -8,7 +8,9 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 /**
  * 全局唯一的 ExoPlayer：媒体源工厂包了 [NetworkMediaSourceFactory]，
  * 网络条目自动走离线缓存（在线命中缓存不重复下载；offlineOnly 断网只读缓存）。
- * v1 不做后台 MediaSession 服务，播放跟随播放页生命周期。
+ *
+ * 进程内单例由 [PlaybackService]（MediaSessionService）持有，服务销毁时 release；
+ * UI 侧只通过 MediaController 操作，不直接拿这个实例。
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 object PlayerEngine {

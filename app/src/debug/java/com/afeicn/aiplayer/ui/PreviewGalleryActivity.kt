@@ -195,14 +195,22 @@ private fun GalleryScreen(
         // 回归用：验证切集后标题与「上一集/下一集」是否随真实游标刷新。
         "player-queue" -> {
             val cursor by playerVm.cursor.collectAsStateWithLifecycle()
+            val controller by playerVm.controllerFlow.collectAsStateWithLifecycle()
             val entry = cursor.currentEntry
             if (entry != null) {
                 VideoPlayerScreen(
                     entry = entry,
+                    player = controller,
+                    isFullscreen = true,
+                    isInPip = false,
+                    workTitle = entry.name,
+                    blurb = "",
+                    hasEpisodePicker = false,
                     hasPrev = cursor.hasPrev,
                     hasNext = cursor.hasNext,
+                    nextEntryName = cursor.nextEntryName,
                     onBack = {}, onPrev = { playerVm.prev() }, onNext = { playerVm.next() },
-                    onEpisodes = {}, onSaveProgress = {}
+                    onEpisodes = {}, onToggleFullscreen = {}, onSaveProgress = {}
                 )
             }
         }
@@ -247,15 +255,25 @@ private fun PlayerGalleryScreen(media: String?) {
             folder = "在线播放", extension = "m3u8", title = "第 8 集"
         )
     }
+    val player = remember { PlayerEngine.player(context) }
     LaunchedEffect(Unit) {
-        PlayerEngine.player(context).apply {
+        player.apply {
             setMediaItem(MediaItem.fromUri(entry.uri))
             prepare()
         }
     }
+    // 截图预览不接后台服务，直接把全局播放器交给播放页（仅 debug 源）。
     VideoPlayerScreen(
         entry = entry,
+        player = player,
+        isFullscreen = true,
+        isInPip = false,
+        workTitle = entry.name,
+        blurb = "",
+        hasEpisodePicker = false,
         hasPrev = true, hasNext = true,
-        onBack = {}, onPrev = {}, onNext = {}, onEpisodes = {}, onSaveProgress = {}
+        nextEntryName = "第 9 集",
+        onBack = {}, onPrev = {}, onNext = {}, onEpisodes = {},
+        onToggleFullscreen = {}, onSaveProgress = {}
     )
 }

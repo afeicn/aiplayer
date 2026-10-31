@@ -1,9 +1,18 @@
 package com.afeicn.aiplayer
 
 import android.app.Application
+import android.content.ComponentName
+import android.os.Bundle
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1094,7 +1103,9 @@ data class PlayerCursor(
     val hasPrev: Boolean,
     val hasNext: Boolean,
     val queueSize: Int,
-    val position: Int
+    val position: Int,
+    /** 竖屏详情区「下一集」用的名称；没有下一集为 null。 */
+    val nextEntryName: String? = null
 )
 
 /**
@@ -1117,20 +1128,71 @@ internal object PlayerCursorRules {
         hasPrev = hasPrev(index, queue.size),
         hasNext = hasNext(index, queue.size),
         queueSize = queue.size,
-        position = position(index, queue.size)
+        position = position(index, queue.size),
+        nextEntryName = PlaybackQueueRules.nextNameOf(queue, index)
     )
 }
 
+/** 播放器对 UI 暴露的实时状态：PiP 资格与宽高比都从这里取。 */
+data class PlaybackUiState(
+    val isPlaying: Boolean = false,
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0
+)
+
+/**
+ * 播放会话的 UI 侧控制器。
+ *
+ * 播放器已经搬到 [PlaybackService]（前台服务 + MediaSession），这里只保留：
+ * - 队列与游标的 UI 快照（切集时 Compose 要重组）；
+ * - 一个懒连接的 [MediaController]，手势/进度条都通过它操作播放器；
+ * - 自定义命令：设置队列、立即存进度、停止并清通知。
+ *
+ * 注意：onCleared 只断开控制器，绝不 release 播放器——Activity 销毁不能把后台播放一起带走。
+ */
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val appContext = app.applicationContext
 
     /** 当前播放队列（离线整剧 / 在线整条线路）与游标；单条播放就是长度为 1 的队列。 */
     private var queue: List<MediaEntry> = emptyList()
     private var index: Int = -1
 
+    private var controller: MediaController? = null
+    private var connecting = false
+    /** 连接尚未完成时又发起了动作：连上后补发最后一个。 */
+    private var pendingAction: ((MediaController) -> Unit)? = null
+
     private val _cursor = MutableStateFlow(PlayerCursorRules.cursor(index, queue))
 
-    /** 播放会话的唯一可观察状态；play/playQueue/next/prev/清空后都会发布新快照。 */
+    /** 播放会话的唯一可观察状态；起播/切集/自动连播/清空后都会发布新快照。 */
     val cursor: StateFlow<PlayerCursor> = _cursor.asStateFlow()
+
+    private val _controller = MutableStateFlow<MediaController?>(null)
+
+    /** 播放器连接；首次起播时才连，避免一进 App 就绑服务。 */
+    val controllerFlow: StateFlow<MediaController?> = _controller.asStateFlow()
+
+    private val _playback = MutableStateFlow(PlaybackUiState())
+    val playback: StateFlow<PlaybackUiState> = _playback.asStateFlow()
+
+    private val playerListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            syncIndexFromController()
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            publishPlaybackState()
+        }
+
+        override fun onVideoSizeChanged(videoSize: VideoSize) {
+            publishPlaybackState()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            syncIndexFromController()
+        }
+    }
 
     /** 当前正在播的条目（null 表示没有播放会话）。 */
     fun currentEntry(): MediaEntry? = _cursor.value.currentEntry
@@ -1139,108 +1201,155 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun hasPrev(): Boolean = _cursor.value.hasPrev
 
     /** 起播一条媒体（在线流 offlineOnly=false；离线缓存条目 offlineOnly=true 断网可播）。 */
-    fun play(entry: MediaEntry) {
-        saveProgress()
-        queue = listOf(entry)
-        index = 0
-        publishCursor()
-        startCurrent()
-    }
+    fun play(entry: MediaEntry) = playQueue(listOf(entry), 0)
 
     /** 起播一个队列（离线剧全部已下载集 / 在线作品一条线路的全部集）。 */
     fun playQueue(entries: List<MediaEntry>, startIndex: Int) {
         if (entries.isEmpty()) return
+        // 先把旧会话的进度存掉；服务端会在 SET_QUEUE 时立即执行。
         saveProgress()
+        val start = PlaybackQueueRules.startIndex(startIndex, entries.size)
         queue = entries
-        index = startIndex.coerceIn(0, entries.lastIndex)
+        index = start
         publishCursor()
-        startCurrent()
+        val payload = PlaybackCommands.encodeQueue(entries, start)
+        withController { it.sendSetQueue(payload) }
     }
 
     fun next() {
         if (!hasNext()) return
-        saveProgress()
-        index++
-        publishCursor()
-        startCurrent()
+        controller?.seekToNextMediaItem()
     }
 
     fun prev() {
         if (!hasPrev()) return
-        saveProgress()
-        index--
+        controller?.seekToPreviousMediaItem()
+    }
+
+    /**
+     * 请求服务立即存进度。[synchronous] = true 用 commit 落盘，给退后台/Activity 销毁
+     * 这种可能紧接着被系统杀掉的时机；真正的写盘逻辑在 [PlaybackService]。
+     */
+    fun saveProgress(synchronous: Boolean = false) {
+        val controller = controller ?: return
+        val args = Bundle().apply { putBoolean(PlaybackCommands.KEY_SYNCHRONOUS, synchronous) }
+        runCatching {
+            controller.sendCustomCommand(
+                SessionCommand(PlaybackCommands.SAVE_PROGRESS, Bundle.EMPTY), args
+            )
+        }
+    }
+
+    /**
+     * 返回键 = 停止播放并清掉媒体通知。
+     * 命令发出后断开控制器：下次起播会重新连接（服务已在 stopSelf 里退出）。
+     */
+    fun stopPlayback() {
+        queue = emptyList()
+        index = -1
         publishCursor()
-        startCurrent()
+        _playback.value = PlaybackUiState()
+        val controller = controller ?: return
+        this.controller = null
+        _controller.value = null
+        val future = runCatching {
+            controller.sendCustomCommand(
+                SessionCommand(PlaybackCommands.STOP, Bundle.EMPTY), Bundle.EMPTY
+            )
+        }.getOrNull()
+        val release = Runnable {
+            controller.removeListener(playerListener)
+            controller.release()
+        }
+        if (future != null) {
+            future.addListener(release, ContextCompat.getMainExecutor(appContext))
+        } else {
+            release.run()
+        }
     }
 
     private fun publishCursor() {
         _cursor.value = PlayerCursorRules.cursor(index, queue)
     }
 
-    private fun startCurrent() {
-        // 队列可能被外部替换/清空，越界时安全退出而不是让 queue[index] 崩溃。
-        val entry = queue.getOrNull(index) ?: return
-        val player = PlayerEngine.player(AppContainer.appContext)
-        player.setMediaItem(entry.toMediaItem())
-        player.seekTo(AppContainer.playbackProgress.positionOf(entry.uri.toString()))
-        player.prepare()
-        player.playWhenReady = true
-        // 剧名取 name（在线搜索条目 name 是片名、title 是集名；离线条目 name 就是清洗后剧名）。
-        if (entry.kind == MediaKind.VIDEO) AppContainer.playbackProgress.saveLastSeries(entry.name)
-        persistEpisode(entry)
+    /** Media3 自动连播/手动切集后，把服务端下标同步回 UI 游标。 */
+    private fun syncIndexFromController() {
+        val controller = controller ?: return
+        if (controller.mediaItemCount == 0) return
+        val current = controller.currentMediaItemIndex
+        if (current in queue.indices && current != index) {
+            index = current
+            publishCursor()
+        }
+        publishPlaybackState()
     }
 
-    /**
-     * 真正起播一集时持久化「剧名 → 集号」。
-     *
-     * 集号优先取 [MediaEntry.episodeNumber]（在线线路序号 / 离线下载记录显式带入）；
-     * 只有整条队列从第 1 集连续且每集都带集号时，才允许用 index + 1 兜底——
-     * 离线队列只含已下载的集，缺集时 index 不等于真实集号，不能反推。
-     */
-    private fun persistEpisode(entry: MediaEntry) {
-        val number = entry.episodeNumber?.takeIf { it > 0 } ?: fallbackEpisodeNumber() ?: return
-        AppContainer.playbackProgress.saveLastEpisode(entry.name, number)
-    }
-
-    private fun fallbackEpisodeNumber(): Int? {
-        if (queue.size <= 1 || index !in queue.indices) return null
-        val complete = queue.indices.all { queue[it].episodeNumber == it + 1 }
-        return if (complete) index + 1 else null
-    }
-
-    /**
-     * 存当前条目断点。[synchronous] = true 时同步写盘，用在可能紧接着被系统杀掉的时机
-     * （退到最近任务、Activity 销毁）；播放中的周期性兜底用默认的异步写。
-     */
-    fun saveProgress(synchronous: Boolean = false) {
-        val entry = currentEntry() ?: return
-        // 没有播放器实例就没有可存的位置，也不为存进度凭空创建一个。
-        val player = PlayerEngine.existing() ?: return
-        AppContainer.playbackProgress.savePosition(
-            entry.uri.toString(), player.currentPosition, synchronous
+    private fun publishPlaybackState() {
+        val controller = controller ?: return
+        val next = PlaybackUiState(
+            isPlaying = controller.isPlaying,
+            videoWidth = controller.videoSize.width,
+            videoHeight = controller.videoSize.height
         )
+        if (_playback.value != next) _playback.value = next
     }
 
-    fun pause() {
-        PlayerEngine.player(AppContainer.appContext).pause()
-        saveProgress()
+    /**
+     * 懒连接 MediaController。连接期间只保留最后一个动作，避免连点起播时堆一串旧队列。
+     */
+    private fun withController(action: (MediaController) -> Unit) {
+        controller?.let { action(it); return }
+        pendingAction = action
+        if (connecting) return
+        connecting = true
+        val token = SessionToken(
+            appContext,
+            ComponentName(appContext, PlaybackService::class.java)
+        )
+        val future = MediaController.Builder(appContext, token).buildAsync()
+        future.addListener({
+            connecting = false
+            val connected = runCatching { future.get() }.getOrNull()
+            if (connected == null) {
+                pendingAction = null
+                return@addListener
+            }
+            connected.addListener(playerListener)
+            controller = connected
+            _controller.value = connected
+            _playback.value = PlaybackUiState(
+                isPlaying = connected.isPlaying,
+                videoWidth = connected.videoSize.width,
+                videoHeight = connected.videoSize.height
+            )
+            val action = pendingAction
+            pendingAction = null
+            action?.invoke(connected)
+        }, ContextCompat.getMainExecutor(appContext))
     }
 
     override fun onCleared() {
-        saveProgress(synchronous = true)
-        PlayerEngine.release()
-        queue = emptyList()
-        index = -1
-        publishCursor()
+        // 只断开 UI 控制器：播放器归前台服务所有，Activity 销毁不能把后台播放 release 掉。
+        controller?.removeListener(playerListener)
+        controller?.release()
+        controller = null
+        _controller.value = null
+        pendingAction = null
     }
 }
 
 /** MediaEntry → Media3 MediaItem：请求头与「只读缓存」标记挂在 tag 上，由 [NetworkMediaSourceFactory] 读取。 */
-fun MediaEntry.toMediaItem(): androidx.media3.common.MediaItem =
-    androidx.media3.common.MediaItem.Builder()
+fun MediaEntry.toMediaItem(): MediaItem =
+    MediaItem.Builder()
         .setUri(uri)
-        .setMediaMetadata(
-            androidx.media3.common.MediaMetadata.Builder().setTitle(displayTitle).build()
-        )
+        .setMediaMetadata(metadata())
         .setTag(NetworkRequestHeaders(networkHeaders, offlineOnly))
         .build()
+
+private fun MediaController.sendSetQueue(payload: Bundle) {
+    runCatching {
+        sendCustomCommand(
+            SessionCommand(PlaybackCommands.SET_QUEUE, Bundle.EMPTY), payload
+        )
+    }
+}

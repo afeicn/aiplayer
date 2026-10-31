@@ -70,11 +70,11 @@ class PlaybackProgressStore(context: Context) {
      */
     fun savePosition(uri: String, positionMs: Long, synchronous: Boolean = false) {
         if (positionMs <= 5_000L) return
-        val editor = prefs.edit().putLong("pos:$uri", positionMs)
+        val editor = prefs.edit().putLong(PlaybackProgressRules.positionKey(uri), positionMs)
         if (synchronous) editor.commit() else editor.apply()
     }
 
-    fun positionOf(uri: String): Long = prefs.getLong("pos:$uri", 0L)
+    fun positionOf(uri: String): Long = prefs.getLong(PlaybackProgressRules.positionKey(uri), 0L)
 
     fun saveLastSeries(title: String) {
         prefs.edit().putString("last_series", MediaTitle.clean(title)).apply()

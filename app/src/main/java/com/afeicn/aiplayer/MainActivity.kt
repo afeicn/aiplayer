@@ -1,10 +1,21 @@
 package com.afeicn.aiplayer
 
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.drawable.Icon
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -12,7 +23,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,20 +48,134 @@ sealed class SheetTarget {
 }
 
 class MainActivity : ComponentActivity() {
+
+    /** Compose 要跟着 PiP 状态切换渲染（小窗里只画视频）。 */
+    var isInPip by mutableStateOf(false)
+        private set
+
+    /** 从 PiP 双击/点全屏回到 App 时置真，由 Compose 消费后进入全屏。 */
+    var pipFullscreenRequested by mutableStateOf(false)
+        private set
+
+    private var pipEligible = false
+    private var pipPlaying = false
+    private var pipAspect = 16 to 9
+    private var pipFeature = false
+    private var wasInPip = false
+
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pipFeature = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        handleIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         setContent { AIPlayerTheme { PlayerApp(this) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_PIP_FULLSCREEN, false) == true) {
+            pipFullscreenRequested = true
+            intent.removeExtra(EXTRA_PIP_FULLSCREEN)
+        }
+    }
+
+    fun consumePipFullscreenRequest(): Boolean {
+        val requested = pipFullscreenRequested
+        pipFullscreenRequested = false
+        return requested
+    }
+
+    /**
+     * 由 Compose 在播放状态变化时调用：
+     * eligibility 为真时 Android 12+ 打开自动进入 PiP，同时保留 onUserLeaveHint 兜底（8–11）。
+     */
+    fun updatePipEligibility(eligible: Boolean, aspect: Pair<Int, Int>, playing: Boolean) {
+        pipEligible = eligible
+        pipPlaying = playing
+        if (aspect.first > 0 && aspect.second > 0) pipAspect = aspect
+        if (!pipFeature) return
+        runCatching { setPictureInPictureParams(buildPipParams(autoEnter = eligible)) }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!pipEligible || !pipFeature || isInPictureInPictureMode) return
+        if (Build.VERSION.SDK_INT < PipRules.MIN_SDK) return
+        runCatching { enterPictureInPictureMode(buildPipParams(autoEnter = false)) }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        if (PipRules.requestFullscreenOnExit(wasInPip, isInPictureInPictureMode)) {
+            // 从 PiP 回到 App：按飞哥要求直达全屏。
+            pipFullscreenRequested = true
+        }
+        wasInPip = isInPictureInPictureMode
+        isInPip = isInPictureInPictureMode
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    }
+
+    private fun buildPipParams(autoEnter: Boolean): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(pipAspect.first, pipAspect.second))
+            .setActions(pipActions())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter)
+        }
+        return builder.build()
+    }
+
+    private fun pipActions(): List<RemoteAction> {
+        val toggle = RemoteAction(
+            Icon.createWithResource(
+                this,
+                if (pipPlaying) R.drawable.ic_pip_pause else R.drawable.ic_pip_play
+            ),
+            if (pipPlaying) "暂停" else "播放",
+            if (pipPlaying) "暂停" else "播放",
+            broadcast(PipRequestCode.TOGGLE, PlaybackActionReceiver.ACTION_TOGGLE_PLAY)
+        )
+        val fullscreen = RemoteAction(
+            Icon.createWithResource(this, R.drawable.ic_pip_fullscreen),
+            "全屏",
+            "全屏",
+            broadcast(PipRequestCode.FULLSCREEN, PlaybackActionReceiver.ACTION_FULLSCREEN)
+        )
+        return listOf(toggle, fullscreen)
+    }
+
+    private fun broadcast(requestCode: Int, action: String): PendingIntent =
+        PendingIntent.getBroadcast(
+            this,
+            requestCode,
+            Intent(this, PlaybackActionReceiver::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    private object PipRequestCode {
+        const val TOGGLE = 1
+        const val FULLSCREEN = 2
+    }
+
+    companion object {
+        const val EXTRA_PIP_FULLSCREEN = "com.afeicn.aiplayer.extra.PIP_FULLSCREEN"
     }
 }
 
 @OptIn(androidx.compose.animation.ExperimentalAnimationApi::class,
       androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
-private fun PlayerApp(activity: ComponentActivity) {
+private fun PlayerApp(activity: MainActivity) {
     val homeVm: HomeViewModel = viewModel()
     val searchVm: SearchViewModel = viewModel()
     val downloadsVm: DownloadsViewModel = viewModel()
@@ -78,8 +205,8 @@ private fun PlayerApp(activity: ComponentActivity) {
     val homeListState = rememberLazyListState()
     val discoverListState = rememberLazyListState()
 
-    // 退到后台（Home 键/切应用/锁屏）立即存进度并暂停：v1 不做后台播放，
-    // 声音只属于前台播放页；播放页内返回的停止在 VideoPlayerScreen 的 onDispose 里。
+    // 退到后台/锁屏不再暂停：播放器由 PlaybackService 持有，锁屏、PiP、切应用都继续播。
+    // 这里只负责在网络状态变化时估一次下载，以及在可能被系统杀掉前同步落一次进度。
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -87,11 +214,9 @@ private fun PlayerApp(activity: ComponentActivity) {
                 // 前台补一次网络重估：连上 WiFi 后等待中的下载立刻续传。
                 androidx.lifecycle.Lifecycle.Event.ON_START -> downloadsVm.onAppForeground()
                 // 进最近任务 / 切走时先同步落盘：部分 ROM 在划掉任务时不再补发 onStop，
-                // 之前只靠 onStop 存，强杀后就会回到更早的断点。
+                // 强杀后就会回到更早的断点。真正的写盘在服务端。
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE ->
                     playerVm.saveProgress(synchronous = true)
-                androidx.lifecycle.Lifecycle.Event.ON_STOP ->
-                    if (PlayerEngine.isActive()) playerVm.pause()
                 else -> Unit
             }
         }
@@ -107,6 +232,17 @@ private fun PlayerApp(activity: ComponentActivity) {
     val sourcesState by sourcesVm.state.collectAsStateWithLifecycle()
     val sheetState by sheetVm.state.collectAsStateWithLifecycle()
     val playerCursor by playerVm.cursor.collectAsStateWithLifecycle()
+    val playerController by playerVm.controllerFlow.collectAsStateWithLifecycle()
+    val playback by playerVm.playback.collectAsStateWithLifecycle()
+
+    // ===== 播放页形态：竖屏默认，系统转横屏或点手动全屏按钮进全屏 =====
+    val configuration = LocalConfiguration.current
+    val systemLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val playerKind = playerCursor.currentEntry?.kind
+    var manualFullscreen by remember { mutableStateOf(false) }
+    // 退出全屏后先锁竖屏，等系统真转回竖屏再恢复自动旋转，避免立刻又被转回横屏。
+    var restoreAutoRotate by remember { mutableStateOf(false) }
+    val isFullscreen = PlayerDisplayRules.isFullscreen(playerKind, manualFullscreen, systemLandscape)
 
     // 最近浏览一出现就静默预取作品卡入缓存：点大卡/最近条目时秒进详情页，不等搜索。
     LaunchedEffect(homeState.recent) { homeVm.prefetchRecentVods(homeState.recent) }
@@ -220,7 +356,11 @@ private fun PlayerApp(activity: ComponentActivity) {
         when (page) {
             Page.DETAIL -> page = detailOrigin
             Page.PLAYER -> {
-                playerVm.saveProgress()
+                // 返回 = 停止播放并清掉媒体通知（不从后台继续，也不做「划掉还播」）。
+                playerVm.stopPlayback()
+                manualFullscreen = false
+                restoreAutoRotate = false
+                playSheet = null
                 page = playerOrigin
             }
             Page.DOWNLOADS, Page.SOURCES -> page = Page.HOME
@@ -229,21 +369,107 @@ private fun PlayerApp(activity: ComponentActivity) {
         }
     }
 
+    fun toggleFullscreen() {
+        if (isFullscreen) {
+            manualFullscreen = false
+            restoreAutoRotate = true
+        } else {
+            manualFullscreen = true
+            restoreAutoRotate = false
+        }
+    }
+
     val isPlayer = page == Page.PLAYER
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
 
-    @Suppress("DEPRECATION")
+    // 离开播放页时清掉手动全屏状态。
     LaunchedEffect(isPlayer) {
-        activity.requestedOrientation =
-            if (isPlayer) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (!isPlayer) {
+            manualFullscreen = false
+            restoreAutoRotate = false
+        }
+    }
+
+    // 方向请求：竖屏默认 + 系统自动旋转；音频锁竖屏；PiP 里完全交给系统。
+    LaunchedEffect(isPlayer, playerKind, manualFullscreen, restoreAutoRotate, systemLandscape, activity.isInPip) {
+        val base = PlayerDisplayRules.orientationRequest(
+            isPlayerPage = isPlayer,
+            kind = playerKind,
+            manualFullscreen = manualFullscreen,
+            isInPip = activity.isInPip
+        )
+        activity.requestedOrientation = when {
+            base == PlayerOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            base == PlayerOrientation.SENSOR_LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            restoreAutoRotate && isPlayer && systemLandscape -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        if (restoreAutoRotate && isPlayer && !systemLandscape) restoreAutoRotate = false
+    }
+
+    // 全屏才隐藏系统栏；竖屏播放页保留状态栏/导航栏，和普通页面一致。
+    LaunchedEffect(isPlayer, isFullscreen, activity.isInPip) {
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        if (isPlayer) controller.hide(WindowInsetsCompat.Type.systemBars())
-        else controller.show(WindowInsetsCompat.Type.systemBars())
+        if (isPlayer && isFullscreen && !activity.isInPip) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
     SideEffect {
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        controller.isAppearanceLightStatusBars = !isDark && !isPlayer
-        controller.isAppearanceLightNavigationBars = !isDark && !isPlayer
+        val lightBars = !isDark && !(isPlayer && isFullscreen)
+        controller.isAppearanceLightStatusBars = lightBars
+        controller.isAppearanceLightNavigationBars = lightBars
+    }
+
+    // Android 13+ 媒体通知需要运行时权限；第一次进播放页时问。
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(isPlayer) {
+        if (isPlayer && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                activity, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // PiP 资格：播放页 + 视频 + 正在播放，三者同时成立才允许按 Home 自动进小窗。
+    val hasPipFeature = remember(activity) {
+        activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    }
+    LaunchedEffect(
+        isPlayer, playerKind, playback.isPlaying,
+        playback.videoWidth, playback.videoHeight, activity.isInPip
+    ) {
+        val eligible = PipRules.eligible(
+            isPlayerPage = isPlayer,
+            kind = playerKind,
+            isPlaying = playback.isPlaying,
+            sdkInt = Build.VERSION.SDK_INT,
+            hasPipFeature = hasPipFeature
+        )
+        activity.updatePipEligibility(
+            eligible = eligible,
+            aspect = PipRules.aspectRatio(playback.videoWidth, playback.videoHeight),
+            playing = playback.isPlaying
+        )
+    }
+    DisposableEffect(activity) {
+        onDispose { activity.updatePipEligibility(false, 16 to 9, false) }
+    }
+
+    // 从 PiP 回到 App 时按飞哥要求直达全屏（双击或小窗全屏按钮都会走到这里）。
+    LaunchedEffect(activity.pipFullscreenRequested) {
+        if (activity.consumePipFullscreenRequest()) {
+            if (isPlayer && playerKind == MediaKind.VIDEO) {
+                manualFullscreen = true
+                restoreAutoRotate = false
+            }
+        }
     }
     BackHandler(page != Page.HOME || sheetTarget != null || showAddSource || pendingSourceDeleteConfirm) {
         when {
@@ -437,14 +663,28 @@ private fun PlayerApp(activity: ComponentActivity) {
             Page.PLAYER -> {
                 val entry = playerCursor.currentEntry
                 if (entry != null) {
+                    // 竖屏详情区的作品名/简介：在线取聚合卡，离线取剧卡；都没有就用条目本身。
+                    val (workTitle, workBlurb) = when (val sheet = playSheet) {
+                        is SheetTarget.Online -> sheet.vod.name to sheet.vod.blurb
+                        is SheetTarget.Continue -> sheet.series.title to sheet.series.blurb
+                        null -> entry.name to ""
+                    }
                     VideoPlayerScreen(
                         entry = entry,
+                        player = playerController,
+                        isFullscreen = isFullscreen,
+                        isInPip = activity.isInPip,
+                        workTitle = workTitle,
+                        blurb = workBlurb,
+                        hasEpisodePicker = playSheet != null,
                         hasPrev = playerCursor.hasPrev,
                         hasNext = playerCursor.hasNext,
+                        nextEntryName = playerCursor.nextEntryName,
                         onBack = ::goBack,
                         onPrev = { playerVm.prev() },
                         onNext = { playerVm.next() },
                         onEpisodes = { playSheet?.let { openSheet(it, EpisodeSheetMode.PLAY) } },
+                        onToggleFullscreen = { toggleFullscreen() },
                         onSaveProgress = { playerVm.saveProgress() }
                     )
                 }

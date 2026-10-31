@@ -1,6 +1,9 @@
 package com.afeicn.aiplayer
 
 internal object PlaybackProgressRules {
+    /** 断点存储 key：按条目 uri 区分（同一部剧的不同集互不覆盖）。抽出来供单测锁定格式。 */
+    fun positionKey(uri: String): String = "pos:$uri"
+
     fun resumePosition(sameMedia: Boolean, livePosition: Long, savedPosition: Long): Long =
         (if (sameMedia) livePosition else savedPosition).coerceAtLeast(0L)
 

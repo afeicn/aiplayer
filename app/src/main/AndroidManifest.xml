@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 锁屏 / 关屏继续播放：播放器在后台需要 CPU 唤醒锁，否则音频会被系统挂起。 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:name=".AIPlayerApplication"
         android:allowBackup="false"
@@ -17,8 +19,11 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:screenOrientation="unspecified"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -29,5 +34,19 @@
             android:name=".OfflineDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 后台播放：Media3 的 MediaSessionService，通知栏 / 锁屏 / 蓝牙媒体键都由它托管。 -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".PlaybackActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>
