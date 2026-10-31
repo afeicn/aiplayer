@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * 离线缓存核心：SimpleCache + DownloadManager + 播放用 CacheDataSource。
@@ -63,6 +64,19 @@ object OfflineDownloadManager {
     private var prefs: DownloadPreferences? = null
     private val failureByDownloadId = mutableMapOf<String, Throwable>()
 
+    /** 超级岛同步需要 Context；只存 applicationContext，避免泄漏 Activity。 */
+    private var appContext: Context? = null
+    private val speedTracker = DownloadSpeedTracker()
+
+    /** 会出现在岛上的活动状态（不包含「获取地址中」占位任务，那里没有真实进度）。 */
+    private val islandActiveStates = setOf(
+        DownloadTaskState.QUEUED,
+        DownloadTaskState.DOWNLOADING,
+        DownloadTaskState.PAUSED,
+        DownloadTaskState.WAITING_NETWORK,
+        DownloadTaskState.WAITING_WIFI
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var monitorJob: Job? = null
     private var migrationJob: Job? = null
@@ -74,6 +88,7 @@ object OfflineDownloadManager {
     fun ensureInitialized(context: Context): DownloadManager {
         manager?.let { return it }
         val ctx = context.applicationContext
+        appContext = ctx
         val database = StandaloneDatabaseProvider(ctx)
         val cacheDir = File(ctx.filesDir, "downloads")
         val simpleCache = SimpleCache(cacheDir, NoOpCacheEvictor(), database)
@@ -415,6 +430,16 @@ object OfflineDownloadManager {
             }.orEmpty()
         }.getOrDefault(emptyList())
         val merged = (active + terminal).distinctBy { it.request.id }
+        // 测速采样：Media3 只给累计字节，速度要在相邻两次刷新之间差分。
+        val sampledAt = System.currentTimeMillis()
+        val activeIds = mutableSetOf<String>()
+        merged.forEach { download ->
+            if (OfflineDownloadRules.mapState(download.state, download.stopReason) in islandActiveStates) {
+                speedTracker.sample(download.request.id, download.bytesDownloaded, sampledAt)
+                activeIds += download.request.id
+            }
+        }
+        speedTracker.retain(activeIds)
         val result = merged.map { download ->
             val item = items[download.request.id] ?: OfflineItem(
                 id = download.request.id,
@@ -451,6 +476,66 @@ object OfflineDownloadManager {
             )
         }
         _downloads.value = result + resolveDownloads
+        syncIsland(result)
+    }
+
+    /**
+     * 把「最需要关注的那条下载」映射成岛状态。
+     *
+     * 优先级：下载中 > 排队 > 等待网络 > 暂停，保证岛展示的是正在推进的任务；
+     * 多任务时用 activeCount 提示还有几条。
+     */
+    private fun syncIsland(downloads: List<OfflineDownload>) {
+        val ctx = appContext ?: return
+        val active = downloads.filter { it.state in islandActiveStates }
+        if (active.isEmpty()) {
+            MiuiIsland.finish(ctx)
+            return
+        }
+        val primary = active.firstOrNull { it.state == DownloadTaskState.DOWNLOADING }
+            ?: active.firstOrNull { it.state == DownloadTaskState.QUEUED }
+            ?: active.firstOrNull {
+                it.state == DownloadTaskState.WAITING_NETWORK || it.state == DownloadTaskState.WAITING_WIFI
+            }
+            ?: active.first()
+        val percent = when {
+            primary.percent >= 0f -> primary.percent.roundToInt().coerceIn(0, 100)
+            primary.totalBytes > 0L ->
+                ((primary.downloadedBytes * 100) / primary.totalBytes).toInt().coerceIn(0, 100)
+            else -> 0
+        }
+        val downloading = primary.state == DownloadTaskState.DOWNLOADING
+        val speed = if (downloading) speedTracker.speedOf(primary.item.id) else null
+        val remaining = if (downloading && speed != null && speed > 0L &&
+            primary.totalBytes > primary.downloadedBytes
+        ) {
+            MiuiFocusText.formatRemaining((primary.totalBytes - primary.downloadedBytes) / speed)
+        } else ""
+        val downloadedText = if (primary.totalBytes > 0L) {
+            "${OfflineDownloadRules.formatBytes(primary.downloadedBytes)} / " +
+                OfflineDownloadRules.formatBytes(primary.totalBytes)
+        } else {
+            OfflineDownloadRules.formatBytes(primary.downloadedBytes)
+        }
+        MiuiIsland.sync(
+            ctx,
+            MiuiIslandState(
+                downloadId = primary.item.id,
+                title = primary.item.title,
+                episode = primary.item.episodeName,
+                status = OfflineDownloadRules.statusLabel(primary.state, primary.failure),
+                percent = percent,
+                speedText = speed?.let { "${OfflineDownloadRules.formatBytes(it)}/s" } ?: "",
+                remainingText = remaining,
+                downloadedText = downloadedText,
+                activeCount = active.size,
+                paused = primary.state in setOf(
+                    DownloadTaskState.PAUSED,
+                    DownloadTaskState.WAITING_NETWORK,
+                    DownloadTaskState.WAITING_WIFI
+                )
+            )
+        )
     }
 }
 

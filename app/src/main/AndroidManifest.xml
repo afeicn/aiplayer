@@ -48,5 +48,21 @@
         <receiver
             android:name=".PlaybackActionReceiver"
             android:exported="false" />
+
+        <!-- 小米超级岛 / 焦点通知上的暂停、继续、取消按钮。 -->
+        <receiver
+            android:name=".DownloadActionReceiver"
+            android:exported="false" />
+
+        <!--
+          小米超级岛联调标识。APP_ID 正式接入前先填包名占位；
+          小米侧开通后替换为开放平台分配的正式 APP_ID。
+        -->
+        <meta-data
+            android:name="com.xiaomi.xms.APP_ID"
+            android:value="com.afeicn.aiplayer" />
+        <meta-data
+            android:name="com.xiaomi.xms.BUILD_TYPE_DEBUG"
+            android:value="${xiaomiBuildTypeDebug}" />
     </application>
 </manifest>

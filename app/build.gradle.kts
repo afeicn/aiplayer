@@ -18,6 +18,8 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.1.2"
+        // 小米超级岛联调标识：debug 包带 BUILD_TYPE_DEBUG=true，release 包为 false。
+        manifestPlaceholders["xiaomiBuildTypeDebug"] = "false"
     }
     signingConfigs {
         if (releaseKeystoreProps.exists()) {
@@ -33,8 +35,12 @@ android {
         }
     }
     buildTypes {
+        debug {
+            manifestPlaceholders["xiaomiBuildTypeDebug"] = "true"
+        }
         release {
             isMinifyEnabled = false
+            manifestPlaceholders["xiaomiBuildTypeDebug"] = "false"
             if (releaseKeystoreProps.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }

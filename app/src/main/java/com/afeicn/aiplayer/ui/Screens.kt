@@ -1301,6 +1301,7 @@ fun SourcesScreen(
                             }
                         }
                         AiSettingsCard(state.ai, onSaveAi, listState)
+                        MiuiFocusDebugCard()
                     }
                 }
             }
@@ -1458,6 +1459,55 @@ private fun HowToAddCard(expanded: Boolean, onToggle: () -> Unit) {
                     Text("• 长按源行进入管理模式，可多选删除。",
                         fontSize = 12.sp, lineHeight = 19.sp, color = palette.onSurfaceVariant)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 小米超级岛 / 焦点通知调试卡：只在 debug 包出现。
+ *
+ * 显示当前设备能力（协议版本、岛特性、焦点权限）并允许手动发一条测试岛，
+ * 便于在小米「设备白名单」有效期内验证，而不用真的等一次下载。
+ */
+@Composable
+private fun MiuiFocusDebugCard() {
+    val context = LocalContext.current
+    val debuggable = remember(context) {
+        runCatching {
+            (context.applicationInfo.flags and
+                android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        }.getOrDefault(false)
+    }
+    if (!debuggable) return
+    val status = remember(context) { MiuiIsland.debugStatus(context) }
+    Surface(color = MaterialTheme.colorScheme.surface, shape = cardShape, tonalElevation = 2.dp) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("小米超级岛（调试）", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(
+                    "仅 debug 包可见；正式上岛需小米侧开通焦点通知权限。",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                status,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(
+                onClick = {
+                    val message = MiuiIsland.sendDebugDemo(context)
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                },
+                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+            ) {
+                Text("发送测试超级岛", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
