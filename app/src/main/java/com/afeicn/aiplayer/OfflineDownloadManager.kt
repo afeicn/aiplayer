@@ -303,7 +303,7 @@ object OfflineDownloadManager {
      * （每次最多 [maxTitles] 部，节奏同海报自愈；启动调度由 UI 层接线调用）。
      * 同一部剧的多集按归一化剧名归组，只抓一次详情页、整部一起补。
      */
-    suspend fun backfillMissingBlurbs(context: Context, maxTitles: Int = 5, fetcher: PageFetcher = HttpPageFetcher()) {
+    suspend fun backfillMissingBlurbs(context: Context, maxTitles: Int = 5, fetcher: PageFetcher = defaultPageFetcher(context)) {
         ensureInitialized(context)
         val localStore = store ?: return
         val marks = context.getSharedPreferences("blurb_backfill", Context.MODE_PRIVATE)

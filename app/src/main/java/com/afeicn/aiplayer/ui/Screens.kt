@@ -416,11 +416,10 @@ fun DiscoverScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
+                // 搜索降级说明 + 被跳过的源：没结果时更要显示，别让用户以为是「真的没有」。
                 state.searchNote?.let { note ->
-                    if (state.results.isNotEmpty()) {
-                        item {
-                            Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                        }
+                    item {
+                        Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
                 if (!state.searching && state.results.isEmpty() && state.error == null && !state.noEnabledSources) {
@@ -507,7 +506,7 @@ fun DetailScreen(
             if (url != null) {
                 blurb = withContext(kotlinx.coroutines.Dispatchers.IO) {
                     runCatching {
-                        VodBlurbParser.extract(HttpPageFetcher().fetch(url, referer).body)
+                        VodBlurbParser.extract(defaultPageFetcher().fetch(url, referer).body)
                     }.getOrDefault("")
                 }
             }
@@ -573,7 +572,7 @@ fun DetailScreen(
             // 带来源请求头里的 Referer：不少站点无 Referer 直接 403，懒抓永远失败。
             val referer = series.sourceItem?.headers?.get("Referer")?.takeIf { it.isNotBlank() }
             blurb = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { VodBlurbParser.extract(HttpPageFetcher().fetch(url, referer).body) }.getOrDefault("")
+                runCatching { VodBlurbParser.extract(defaultPageFetcher().fetch(url, referer).body) }.getOrDefault("")
             }
         }
     }

@@ -29,13 +29,13 @@ object SubscriptionPipeline {
     private val pipelineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 抓详情页并解析集数（帝国CMS 的 `/e/DownSys/play/?…` 已由 [EpisodeListParser] 通用兜底识别）。 */
-    fun fetchEpisodes(detailUrl: String, fetcher: PageFetcher = HttpPageFetcher()): List<EpisodeLink> {
+    fun fetchEpisodes(detailUrl: String, fetcher: PageFetcher = defaultPageFetcher()): List<EpisodeLink> {
         val page = fetcher.fetch(detailUrl, null)
         return EpisodeListParser.extract(page.body, page.url)
     }
 
     /** 抓详情页取主海报 URL（下载记录/最近浏览的海报回填用）；失败或没有返回空串。 */
-    fun fetchPoster(detailUrl: String, referer: String? = null, fetcher: PageFetcher = HttpPageFetcher()): String =
+    fun fetchPoster(detailUrl: String, referer: String? = null, fetcher: PageFetcher = defaultPageFetcher()): String =
         runCatching {
             val page = fetcher.fetch(detailUrl, referer)
             PosterFinder.find(page.body, page.url)
@@ -50,7 +50,7 @@ object SubscriptionPipeline {
         detailUrl: String,
         title: String,
         source: OnlineVideoSource,
-        fetcher: PageFetcher = HttpPageFetcher(),
+        fetcher: PageFetcher = defaultPageFetcher(),
         ai: DeepSeekClient? = null
     ): DetailFetch = withContext(Dispatchers.IO) {
         val referer = source.referer.takeIf { it.isNotBlank() }
@@ -68,13 +68,13 @@ object SubscriptionPipeline {
     }
 
     /** 音频源：从页面里找 `<audio src>` 或 `.mp3/.m4a/.flac/.aac` 直链（相对地址补全）。 */
-    fun fetchAudioLinks(detailUrl: String, fetcher: PageFetcher = HttpPageFetcher()): List<String> {
+    fun fetchAudioLinks(detailUrl: String, fetcher: PageFetcher = defaultPageFetcher()): List<String> {
         val page = fetcher.fetch(detailUrl, null)
         return AudioDirectLink.findAudioLinks(page.body).map { AudioDirectLink.resolve(page.url, it) }
     }
 
     /** 解析一条播放页地址到可播流（iframe 递归、m3u8/直链提取）；失败返回 null。 */
-    fun resolveStream(episodeUrl: String, fetcher: PageFetcher = HttpPageFetcher()): NetworkStream? {
+    fun resolveStream(episodeUrl: String, fetcher: PageFetcher = defaultPageFetcher()): NetworkStream? {
         val result = runCatching { WebLinkResolver.resolve(episodeUrl, fetcher) }.getOrNull()
         return (result as? WebLinkResult.Success)?.stream
     }
@@ -138,7 +138,7 @@ object SubscriptionPipeline {
         source: OnlineVideoSource,
         detailUrl: String,
         indices: List<Int>,
-        fetcher: PageFetcher = HttpPageFetcher()
+        fetcher: PageFetcher = defaultPageFetcher()
     ): List<OfflineItem> = withContext(Dispatchers.IO) {
         if (indices.isEmpty()) return@withContext emptyList()
         if (source.type == SourceType.AUDIO) {
@@ -170,7 +170,7 @@ object SubscriptionPipeline {
         source: OnlineVideoSource,
         detailUrl: String,
         indices: List<Int>,
-        fetcher: PageFetcher = HttpPageFetcher()
+        fetcher: PageFetcher = defaultPageFetcher()
     ): BatchDownloadSummary {
         val items = resolveItems(dramaTitle, source, detailUrl, indices, fetcher)
         return EpisodeBatchDownloader.enqueueEpisodes(context, items)
@@ -204,7 +204,7 @@ object SubscriptionPipeline {
         detailUrl: String,
         indices: List<Int>,
         cover: String = "",
-        fetcher: PageFetcher = HttpPageFetcher()
+        fetcher: PageFetcher = defaultPageFetcher()
     ): Int {
         if (indices.isEmpty()) return 0
         val placeholders = indices.map { resolvingPlaceholder(dramaTitle, source, detailUrl, it, cover) }
@@ -236,7 +236,7 @@ object SubscriptionPipeline {
         detailUrl: String,
         indices: List<Int>,
         cover: String = "",
-        fetcher: PageFetcher = HttpPageFetcher()
+        fetcher: PageFetcher = defaultPageFetcher()
     ) = withContext(Dispatchers.IO) {
         if (indices.isEmpty()) return@withContext
         if (source.type == SourceType.AUDIO) {

@@ -195,7 +195,7 @@ object ContinueDownloadRules {
 fun SubscriptionPipeline.fetchContinueEpisodes(
     detailUrl: String,
     audio: Boolean,
-    fetcher: PageFetcher = HttpPageFetcher()
+    fetcher: PageFetcher = defaultPageFetcher()
 ): List<EpisodeLink> =
     if (audio) ContinueDownloadRules.audioEpisodes(fetchAudioLinks(detailUrl, fetcher))
     else fetchEpisodes(detailUrl, fetcher)

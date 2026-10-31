@@ -54,7 +54,7 @@ suspend fun resolveWebLink(
     onFallbackHint: (String) -> Unit = {}
 ): WebLinkResult = withContext(Dispatchers.IO) {
     runCatching {
-        WebLinkResolver.resolve(url, HttpPageFetcher()) { pageUrl ->
+        WebLinkResolver.resolve(url, defaultPageFetcher(appContext)) { pageUrl ->
             onFallbackHint("源码解析不到，正在用内置浏览器渲染页面…")
             HiddenWebViewResolver(appContext).resolve(pageUrl)
         }

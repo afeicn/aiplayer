@@ -100,12 +100,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                     }
+                    // 被跳过的源（站方封锁 / 挑战失败冷却）给一句人话，别让用户以为「没结果」。
+                    val finalNote = listOfNotNull(note, skippedSourcesNote())
+                        .joinToString("；")
+                        .ifBlank { null }
                     _state.value = _state.value.copy(
                         searching = false,
                         results = cards,
                         failedSources = failed,
                         aiAssisted = aiAssisted,
-                        searchNote = note,
+                        searchNote = finalNote,
                         error = null
                     )
                 },
@@ -182,6 +186,25 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                 recommendationsLoading = false
             )
         }
+    }
+
+    /**
+     * 本次搜索被跳过的源：站方封锁的给 `witzsb.com 站方封锁，无法访问`，
+     * Cloudflare 挑战失败冷却中的给 `booksru.net 需要验证，暂时跳过`。
+     * 只汇报启用中的源，未启用的不打扰用户。
+     */
+    private fun skippedSourcesNote(): String? {
+        val now = System.currentTimeMillis()
+        return AppContainer.sourceStore.sources()
+            .filter { it.enabled }
+            .mapNotNull { source ->
+                AppContainer.sourceStatusStore.skipReason(source, now)?.let { reason ->
+                    "${SourceStatusRules.hostOf(source.normalizedBase)} $reason"
+                }
+            }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString("；")
     }
 
     fun removeHistory(keyword: String) {
@@ -287,7 +310,12 @@ class EpisodeSheetViewModel : ViewModel() {
             if (detailUrl.isEmpty()) {
                 val located = runCatching {
                     withContext(Dispatchers.IO) {
-                        ContinueSourceLocator.locate(target, HttpSearchTransport(), AppContainer.sourceStore.sources())
+                        ContinueSourceLocator.locate(
+                            target = target,
+                            transport = defaultSearchTransport(),
+                            extraSources = AppContainer.sourceStore.sources(),
+                            skipReason = { AppContainer.sourceStatusStore.skipReason(it) }
+                        )
                     }
                 }.getOrNull()
                 if (located == null || located.detailUrl.isBlank()) {
@@ -323,7 +351,7 @@ class EpisodeSheetViewModel : ViewModel() {
             val ai = AppContainer.aiClientOrNull()
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    SubscriptionPipeline.fetchEpisodesWithFallback(detailUrl, title, source, HttpPageFetcher(), ai)
+                    SubscriptionPipeline.fetchEpisodesWithFallback(detailUrl, title, source, defaultPageFetcher(), ai)
                 }
             }
             result.fold(
@@ -677,7 +705,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 val resume = runCatching {
                     withContext(Dispatchers.IO) {
                         val fetched = SubscriptionPipeline.fetchEpisodesWithFallback(
-                            detailUrl, vod.name, source, HttpPageFetcher(), AppContainer.aiClientOrNull()
+                            detailUrl, vod.name, source, defaultPageFetcher(), AppContainer.aiClientOrNull()
                         )
                         val episodes = fetched.episodes
                         val total = episodes.maxOfOrNull { it.index } ?: 0
@@ -800,13 +828,22 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
             rows = AppContainer.sourceStore.sources().map { source ->
                 val health = AppContainer.sourceStore.health(source.id)
                 val tier = SourceHealthPolicy.tier(health, now)
+                // 站方封锁 / Cloudflare 挑战失败冷却优先于普通的网络健康文案：
+                // 前者是确定性结论，后者只是「最近连续失败」。
+                val status = AppContainer.sourceStatusStore.effective(source.normalizedBase, now)
+                val blocked = status.availability == SourceAvailability.BLOCKED
+                val challengeFailed = status.availability == SourceAvailability.CHALLENGE_FAILED
+                val cfNote = AppContainer.sourceStatusStore.noteFor(source.normalizedBase, now)
                 SourceRowUi(
                     source = source,
-                    healthy = tier == SourceCooldownTier.ACTIVE,
+                    healthy = tier == SourceCooldownTier.ACTIVE && !blocked && !challengeFailed,
                     healthText = when {
+                        blocked -> SourceStatusRules.BLOCKED_REASON
+                        challengeFailed -> SourceStatusRules.CHALLENGE_COOLDOWN_NOTE
                         !source.enabled -> "已停用"
                         tier == SourceCooldownTier.LONG_TERM -> "长期不可用 · 连续失败 ${health.consecutiveFailures} 次"
                         SourceHealthPolicy.isCoolingDown(health, now) -> "网络异常 · 连续失败 ${health.consecutiveFailures} 次"
+                        cfNote != null -> "已启用 · $cfNote"
                         health.lastSuccessAt > 0 -> "已启用 · 运行正常"
                         else -> "未检测"
                     }
@@ -834,6 +871,23 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
             name = hostOf(base),
             base = base
         )
+        // 站方全站封锁的站：只标记、不访问（连首页探测都不发）。
+        val blocked = AppContainer.sourceStatusStore.effective(base)
+            .takeIf { it.availability == SourceAvailability.BLOCKED }
+        if (blocked != null) {
+            AppContainer.sourceStore.save(source.copy(enabled = false))
+            val host = SourceStatusRules.hostOf(base)
+            _state.value = _state.value.copy(
+                probing = null,
+                probeSession = ProbeSession(
+                    sourceName = source.name, done = true, success = false,
+                    conclusion = "「$host」${blocked.reason}，本次没有访问站点，已存为未启用。"
+                ),
+                notice = "「$host」${blocked.reason}"
+            )
+            refresh()
+            return
+        }
         _state.value = _state.value.copy(
             probing = source.name,
             probeSession = ProbeSession(source.name)
@@ -844,7 +898,7 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
                     // 探测用原始地址跑（粘的是哪一页就抓哪一页），落库用站点根。
                     SourceProber.probeWithAi(
                         source.copy(base = addressInfo.original),
-                        HttpSearchTransport(),
+                        defaultSearchTransport(),
                         AppContainer.aiClientOrNull()
                     ) { event -> appendProbeEvent(event) }
                 }
@@ -877,6 +931,21 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
         if (state.value.probing != null) return
         val addressInfo = SourceAddressRules.analyze(stored.base)
         val normalized = stored.copy(base = addressInfo.siteBase)
+        // 站方封锁 / Cloudflare 挑战失败冷却中：本次不探测，把原因直接告诉用户。
+        val skip = AppContainer.sourceStatusStore.skipReason(normalized.normalizedBase)
+        if (skip != null) {
+            val host = SourceStatusRules.hostOf(normalized.normalizedBase)
+            _state.value = _state.value.copy(
+                probing = null,
+                probeSession = ProbeSession(
+                    sourceName = stored.name, done = true, success = false,
+                    conclusion = "本次不探测：$host $skip"
+                ),
+                notice = "「$host」$skip"
+            )
+            refresh()
+            return
+        }
         _state.value = _state.value.copy(
             probing = stored.name,
             probeSession = ProbeSession(stored.name)
@@ -886,7 +955,7 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     SourceProber.probeWithAi(
                         stored.copy(base = addressInfo.original),
-                        HttpSearchTransport(),
+                        defaultSearchTransport(),
                         AppContainer.aiClientOrNull()
                     ) { event -> appendProbeEvent(event) }
                 }
@@ -995,9 +1064,12 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(notice = DestructiveCopy.deletedSourcesToast(n))
     }
 
-    /** 冷却期手动恢复。 */
+    /** 冷却期手动恢复：连续失败计数与 Cloudflare 挑战冷却一起清掉（内置封锁仍不可恢复）。 */
     fun recover(id: String) {
         AppContainer.sourceStore.recover(id)
+        AppContainer.sourceStore.sources().firstOrNull { it.id == id }?.let { source ->
+            AppContainer.sourceStatusStore.clear(source.normalizedBase)
+        }
         refresh()
     }
 

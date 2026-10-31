@@ -192,8 +192,19 @@ data class SourceSearchOutcome(
 
 data class SearchReport(val hits: List<SourceHit>, val outcomes: List<SourceSearchOutcome>)
 
-/** 多源并行搜索（HTML 探测 + MacCMS JSON 回退）+ 连通性测试。 */
-class OnlineSearchEngine(private val store: OnlineSourceStore) {
+/**
+ * 多源并行搜索（HTML 探测 + MacCMS JSON 回退）+ 连通性测试。
+ *
+ * 默认走 [defaultSearchTransport]（带 Cloudflare 预热），并按 [SourceStatusStore] 跳过
+ * 「站方封锁 / 挑战失败冷却中」的源；单测可注入假 transport 与空 skip 规则。
+ */
+class OnlineSearchEngine(
+    private val store: OnlineSourceStore,
+    private val transport: SearchTransport = defaultSearchTransport(),
+    private val skipReason: (OnlineVideoSource) -> String? = {
+        AppContainer.sourceStatusStore.skipReason(it)
+    }
+) {
 
     fun detailUrl(source: OnlineVideoSource, keyword: String): String {
         val encoded = URLEncoder.encode(keyword, "UTF-8")
@@ -212,7 +223,15 @@ class OnlineSearchEngine(private val store: OnlineSourceStore) {
         aiFallback: AiSearchFallback? = null,
         requireRule: Boolean = false
     ): SearchReport {
-        val raw = CrossSourceSearchEngine.search(store, keyword, HttpSearchTransport(), now, aiFallback, requireRule)
+        val raw = CrossSourceSearchEngine.search(
+            store = store,
+            keyword = keyword,
+            transport = transport,
+            now = now,
+            aiFallback = aiFallback,
+            requireRule = requireRule,
+            skipReason = skipReason
+        )
         val outcomes = raw.map { outcome ->
             SourceSearchOutcome(
                 source = outcome.source,
@@ -233,7 +252,11 @@ class OnlineSearchEngine(private val store: OnlineSourceStore) {
 
     /** 「测试连通性」：按源规则搜一次「测试」，给出耗时与条数（HTML 探测或 JSON 接口）。 */
     suspend fun testConnectivity(source: OnlineVideoSource): SourceSearchOutcome = withContext(Dispatchers.IO) {
-        val outcome = CrossSourceSearchEngine.searchSource(source, store, "测试", HttpSearchTransport())
+        // 封锁 / 冷却中的源不访问，直接把原因回给 UI（与搜索时的跳过口径一致）。
+        skipReason(source)?.let { reason ->
+            return@withContext SourceSearchOutcome(source, false, 0L, 0, error = reason)
+        }
+        val outcome = CrossSourceSearchEngine.searchSource(source, store, "测试", transport)
         SourceSearchOutcome(
             source = source,
             success = outcome.success,

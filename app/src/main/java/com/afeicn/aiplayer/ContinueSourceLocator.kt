@@ -88,7 +88,9 @@ object ContinueSourceLocator {
     fun locate(
         target: ContinueTarget,
         transport: SearchTransport,
-        extraSources: List<OnlineVideoSource> = emptyList()
+        extraSources: List<OnlineVideoSource> = emptyList(),
+        /** 非空表示该源不参与定位（站方封锁 / Cloudflare 挑战失败冷却）。 */
+        skipReason: (OnlineVideoSource) -> String? = { null }
     ): SourceLookup? {
         val title = MediaTitle.clean(target.title)
         if (title.isEmpty()) return null
@@ -97,7 +99,7 @@ object ContinueSourceLocator {
         }
         val keywords = keywordsOf(title)
         if (keywords.isEmpty()) return null
-        for (source in candidateSources(target, extraSources)) {
+        for (source in candidateSources(target, extraSources).filter { skipReason(it) == null }) {
             for (keyword in keywords) {
                 val items = runCatching {
                     SourceProber.probe(source, transport, keyword = keyword).items

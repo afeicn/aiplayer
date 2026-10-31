@@ -135,6 +135,52 @@ object SearchResultsParser {
         return withoutTags.lowercase().contains(needle)
     }
 
+    // ==================== 详情页兜底（站点没有关键词搜索，搜索入口直接跳详情页）====================
+
+    private val OG_META = Regex("""<meta\b[^>]*\bproperty\s*=\s*["']og:title["'][^>]*>""", RegexOption.IGNORE_CASE)
+    private val CONTENT_ATTR = Regex("""content\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+    private val H1 = Regex("""<h1\b[^>]*>(.*?)</h1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val HTML_TITLE = Regex("""<title\b[^>]*>(.*?)</title>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    /** 标题里的分段符：站点尾巴一般用这些符号接在后面。 */
+    private val TITLE_SEGMENT = Regex("""\s*[-–—_|｜·]\s*([^-–—_|｜·]{1,24})\s*$""")
+    /** 站点/画质/集数尾巴：命中就把这一段削掉。 */
+    private val SITE_TAIL = Regex(
+        """^(?:在线观看|在线播放|免费在线观看|免费高清|高清完整版|完整版|高清|免费|在线|下载|第\s*\d+\s*[集期话]|\S{0,10}(?:影视|影院|电影网|视频网|资源网|剧场|网))$"""
+    )
+    /** 没分段符直接粘在题目后面的尾巴。 */
+    private val STUCK_TAIL = Regex("""(?:在线观看|在线播放|免费在线观看|免费高清|高清完整版|全集在线观看)+$""")
+
+    /**
+     * 详情页标题：`og:title` → `<h1>` → `<title>`，取第一个非空的并用 [MediaTitle.clean] 清洗。
+     *
+     * 详情页标题普遍带站点尾巴（`御赐小仵作2-在线观看-免费高清-大象影视`），这里把
+     * 「在线观看 / 免费高清 / xxx影视」这类尾巴去掉，只留作品名。
+     */
+    fun detailTitle(html: String): String {
+        if (html.isBlank()) return ""
+        val raw = ogTitle(html).ifBlank { H1.find(html)?.groupValues?.get(1).orEmpty() }
+            .ifBlank { HTML_TITLE.find(html)?.groupValues?.get(1).orEmpty() }
+        return cleanSiteTail(MediaTitle.clean(raw))
+    }
+
+    private fun ogTitle(html: String): String {
+        val tag = OG_META.find(html)?.value ?: return ""
+        val match = CONTENT_ATTR.find(tag) ?: return ""
+        return match.groupValues[1].ifEmpty { match.groupValues[2] }
+    }
+
+    /** 反复削掉标题尾部的站点/画质段；作品名本身带的分隔符（如 `Spider-Man`）不动。 */
+    private fun cleanSiteTail(title: String): String {
+        var text = title.trim()
+        repeat(4) {
+            val segment = TITLE_SEGMENT.find(text) ?: return@repeat
+            if (!SITE_TAIL.matches(segment.groupValues[1].trim())) return@repeat
+            text = text.substring(0, segment.range.first).trim()
+        }
+        text = STUCK_TAIL.replace(text, "").trim()
+        return text.ifBlank { title.trim() }
+    }
+
     private fun itemFromBlock(block: String, baseUrl: String): SearchResultItem? {
         val h2 = H2.find(block) ?: return null
         val a = A_TAG.find(h2.groupValues[1]) ?: return null

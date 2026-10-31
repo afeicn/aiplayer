@@ -102,12 +102,18 @@ object SearchRuleDetector {
 
     /** 由规则构造 GET 请求地址（替换 `{kw}`，GET 表单的隐藏字段拼到 query 上）。 */
     fun buildGetUrl(rule: SearchRule, baseUrl: String, keyword: String): String {
-        val url = substituteTemplate(rule.urlTemplate, baseUrl, keyword)
-        if (rule.method == SearchMethod.GET && rule.staticParams.isNotEmpty()) {
-            val query = rule.staticParams.entries.joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }
-            return if (url.contains('?')) "$url&$query" else "$url?$query"
+        val template = rule.urlTemplate
+        val hasKeywordSlot = template.contains("{kw}") || template.contains("{keyword}")
+        val url = substituteTemplate(template, baseUrl, keyword)
+        // 首页表单的 action 通常不带占位符（`/search.html`），关键词字段名在输入框的 name 上，
+        // 这里把 `wd=…` 补上；否则 GET 表单搜索等于没带关键词（站点只会回默认搜索页）。
+        val params = mutableListOf<String>()
+        if (!hasKeywordSlot && rule.keywordParam.isNotBlank()) params += "${enc(rule.keywordParam)}=${enc(keyword)}"
+        if (rule.method == SearchMethod.GET) {
+            rule.staticParams.forEach { (k, v) -> params += "${enc(k)}=${enc(v)}" }
         }
-        return url
+        if (params.isEmpty()) return url
+        return if (url.contains('?')) "$url&${params.joinToString("&")}" else "$url?${params.joinToString("&")}"
     }
 
     /** 由规则构造 POST 请求体：隐藏字段 + 关键词字段。 */

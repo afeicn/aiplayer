@@ -39,12 +39,59 @@ fun interface PageFetcher {
     fun fetch(url: String, referer: String?): FetchedPage
 }
 
-/** 真实抓取实现：HttpURLConnection + 桌面 UA + 可选 Referer，手动跟随重定向。 */
+/**
+ * 真实抓取实现：HttpURLConnection + 桌面 UA + 可选 Referer，手动跟随重定向。
+ *
+ * Cloudflare 支持（两个参数都可选，默认 null → 与旧行为完全一致）：
+ *  - [cookieStore]：每个请求按当前 host 取预热好的 cookie 放进 `Cookie` 头；
+ *  - [warmer]：遇到「403 + Cloudflare 特征」时触发一次预热，成功后原 URL 重试一次。
+ */
 class HttpPageFetcher(
     private val timeoutMs: Int = 10_000,
-    private val maxRedirects: Int = 5
+    private val maxRedirects: Int = 5,
+    private val cookieStore: CloudflareCookieStore? = null,
+    private val warmer: (() -> CloudflareWarmup?)? = null
 ) : PageFetcher {
+
     override fun fetch(url: String, referer: String?): FetchedPage {
+        // 一次 fetch 最多因 Cloudflare 预热重试一次，避免挑战失败时死循环。
+        var warmedOnce = false
+        while (true) {
+            val response = requestFollowingRedirects(url, referer)
+            if (response.code == 403 && CloudflareChallenge.looksLikeChallenge(response.body)) {
+                val warmerFactory = warmer
+                    // 没注入 warmer（旧的无参用法）→ 保持原来的「HTTP 403」行为。
+                    ?: throw WebLinkFetchException("HTTP ${response.code}", response.code)
+                if (!warmedOnce) {
+                    warmedOnce = true
+                    val host = hostOf(response.url)
+                    val warmed = runCatching {
+                        host != null && warmerFactory.invoke()?.warm(host) == true
+                    }.getOrDefault(false)
+                    if (warmed) continue
+                }
+                throw WebLinkFetchException("Cloudflare 拦截", 403)
+            }
+            if (response.code !in 200..299) {
+                throw WebLinkFetchException("HTTP ${response.code}", response.code)
+            }
+            return FetchedPage(
+                url = response.url,
+                contentType = response.contentType,
+                body = response.body
+            )
+        }
+    }
+
+    private data class RawResponse(
+        val url: String,
+        val code: Int,
+        val contentType: String,
+        val body: String
+    )
+
+    /** 发一次请求并跟随重定向；每跳都按该跳的 host 重新查 cookie。 */
+    private fun requestFollowingRedirects(url: String, referer: String?): RawResponse {
         var current = url
         repeat(maxRedirects + 1) {
             val connection = URL(current).openConnection() as HttpURLConnection
@@ -53,9 +100,19 @@ class HttpPageFetcher(
                 connection.connectTimeout = timeoutMs
                 connection.readTimeout = timeoutMs
                 connection.instanceFollowRedirects = false
-                connection.setRequestProperty("User-Agent", DEFAULT_DESKTOP_UA)
+                val host = hostOf(current)
+                val cookie = host?.let { cookieStore?.cookieFor(it) }?.takeIf { it.isNotBlank() }
+                // cf_clearance 与客户端 UA 绑定：带 cookie 时必须复用预热时的 UA，否则会被重新挑战。
+                val userAgent = if (cookie != null) {
+                    host?.let { cookieStore?.userAgentFor(it) }?.takeIf { it.isNotBlank() }
+                        ?: DEFAULT_DESKTOP_UA
+                } else {
+                    DEFAULT_DESKTOP_UA
+                }
+                connection.setRequestProperty("User-Agent", userAgent)
                 connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 if (!referer.isNullOrBlank()) connection.setRequestProperty("Referer", referer)
+                if (cookie != null) connection.setRequestProperty("Cookie", cookie)
                 val code = connection.responseCode
                 if (code in 300..399) {
                     val location = connection.getHeaderField("Location")
@@ -63,16 +120,23 @@ class HttpPageFetcher(
                     current = URL(URL(current), location).toString()
                     return@repeat
                 }
-                if (code !in 200..299) throw WebLinkFetchException("HTTP $code", code)
                 val contentType = connection.contentType.orEmpty()
-                val body = if (isTextContent(contentType)) readBody(connection) else ""
-                return FetchedPage(url = current, contentType = contentType, body = body)
+                val body = when {
+                    code in 200..299 && isTextContent(contentType) -> readBody(connection)
+                    // 错误响应也要读正文：Cloudflare 挑战页里没有影片数据，但正文有特征。
+                    code !in 200..299 -> readErrorBody(connection, contentType)
+                    else -> ""
+                }
+                return RawResponse(url = current, code = code, contentType = contentType, body = body)
             } finally {
                 connection.disconnect()
             }
         }
         throw WebLinkFetchException("重定向次数过多")
     }
+
+    private fun hostOf(url: String): String? =
+        runCatching { URL(url).host }.getOrNull()?.takeIf { it.isNotBlank() }
 
     private fun isTextContent(contentType: String): Boolean {
         val ct = contentType.lowercase()
@@ -83,6 +147,32 @@ class HttpPageFetcher(
 
     private fun readBody(connection: HttpURLConnection): String =
         connection.inputStream.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
+
+    /** 非 2xx 的正文在 errorStream 里；尽力读，读不到就当空（不触发 Cloudflare 判定）。 */
+    private fun readErrorBody(connection: HttpURLConnection, contentType: String): String {
+        if (!isTextContent(contentType)) return ""
+        return runCatching {
+            connection.errorStream?.readBytes()?.toString(Charsets.UTF_8)?.removePrefix("\uFEFF").orEmpty()
+        }.getOrDefault("")
+    }
+}
+
+/** Cloudflare 拦截页特征：403 时正文命中任一标记才认为是挑战，普通 403 不触发预热。 */
+internal object CloudflareChallenge {
+    private val MARKERS = listOf(
+        "cf-error",
+        "cloudflare",
+        "just a moment",
+        "attention required",
+        "请稍候",
+        "安全验证"
+    )
+
+    fun looksLikeChallenge(body: String): Boolean {
+        if (body.isBlank()) return false
+        val lowered = body.lowercase()
+        return MARKERS.any { lowered.contains(it) }
+    }
 }
 
 /** 解析出的候选流：绝对地址 + 应当携带的 Referer（发现它的页面域名）。 */

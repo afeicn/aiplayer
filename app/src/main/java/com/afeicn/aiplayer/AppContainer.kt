@@ -19,6 +19,12 @@ object AppContainer {
     val downloadPrefs: DownloadPreferences by lazy { DownloadPreferences(appContext) }
     val playbackProgress: PlaybackProgressStore by lazy { PlaybackProgressStore(appContext) }
     val aiSettings: AiSettingsStore by lazy { AiSettingsStore(appContext) }
+    /** 源健康状况（域名 → 封锁 / Cloudflare 挑战失败冷却），搜索时据此跳过。 */
+    val sourceStatusStore: SourceStatusStore by lazy { SourceStatusStore(appContext) }
+    /** 全进程共用的 Cloudflare 预热门禁：失败后 30 分钟内不再启 WebView。 */
+    val cloudflareWarmer: CloudflareWarmup by lazy {
+        GuardedCloudflareWarmer(CloudflareWarmer(appContext), sourceStatusStore)
+    }
 
     fun init(context: Context) {
         appContext = context.applicationContext

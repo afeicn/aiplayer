@@ -92,9 +92,12 @@ class SourceProberTest {
                 else -> SearchHttpResponse(req.url, 500)
             }
         }
-        val body = SourceProber.executeSearch(rule, base, "测试", transport)
-        assertNotNull(body)
-        assertTrue(body!!.contains("测试影片"))
+        val fetched = SourceProber.executeSearch(rule, base, "测试", transport)
+        assertNotNull(fetched)
+        assertTrue(fetched!!.body.contains("测试影片"))
+        // 状态码与最终地址也一并带出（失败文案要用）。
+        assertEquals(200, fetched.status)
+        assertTrue(fetched.finalUrl.contains("searchid=18708"))
         // 第一次 POST，第二次用 GET 跟随相对 Location（不是重发 POST）
         assertEquals("POST", transport.requests[0].method)
         assertEquals("GET", transport.requests[1].method)
