@@ -370,13 +370,9 @@ private fun PlayerApp(activity: MainActivity) {
     }
 
     fun toggleFullscreen() {
-        if (isFullscreen) {
-            manualFullscreen = false
-            restoreAutoRotate = true
-        } else {
-            manualFullscreen = true
-            restoreAutoRotate = false
-        }
+        val next = PlayerDisplayRules.fullscreenToggleState(isFullscreen)
+        manualFullscreen = next.manualFullscreen
+        restoreAutoRotate = next.restoreAutoRotate
     }
 
     val isPlayer = page == Page.PLAYER

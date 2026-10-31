@@ -37,12 +37,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.afeicn.aiplayer.AcceleratedSeek
 import com.afeicn.aiplayer.MediaEntry
 import com.afeicn.aiplayer.MediaKind
+import com.afeicn.aiplayer.OrientationToggle
+import com.afeicn.aiplayer.PlaybackSpeedRules
+import com.afeicn.aiplayer.PlayerDisplayRules
 import com.afeicn.aiplayer.PlayerGestureRules
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -93,8 +97,11 @@ fun VideoPlayerScreen(
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0L)) }
     var scrubbing by remember { mutableStateOf(false) }
     var scrubPosition by remember { mutableLongStateOf(0L) }
-    var speedIndex by remember { mutableIntStateOf(0) }
-    val speeds = listOf(1.0f, 1.25f, 1.5f, 2.0f)
+    // 倍速控件是唯一入口：状态从播放器当前速度回推，重进页面不会错误显示 1.0x。
+    var speedIndex by remember(player) {
+        mutableIntStateOf(PlaybackSpeedRules.indexOf(player.playbackParameters.speed))
+    }
+    var speedMenuOpen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
 
     // ==================== 手势层状态（行为对齐 104vplayer GesturePlayerView） ====================
@@ -134,6 +141,15 @@ fun VideoPlayerScreen(
         player.seekTo(target)
         position = target
     }
+    fun selectSpeed(speed: Float) {
+        player.setPlaybackSpeed(speed)
+        speedIndex = PlaybackSpeedRules.indexOf(speed)
+        speedMenuOpen = false
+    }
+    fun setSpeedMenuOpen(open: Boolean) {
+        speedMenuOpen = open
+        if (open) controlsVisible = true
+    }
 
     LaunchedEffect(player, entry) {
         while (isActive) {
@@ -143,9 +159,29 @@ fun VideoPlayerScreen(
             delay(500)
         }
     }
-    LaunchedEffect(playing, controlsVisible) {
-        // 控制层显示 3 秒后自动隐藏（暂停态保持可见）。
-        if (playing && controlsVisible) { delay(3000); controlsVisible = false }
+    // 倍速可能被手势长按临时改掉；长按浮层在场时不回写控件，松手恢复后再同步。
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+                if (speedOverlay == null) {
+                    speedIndex = PlaybackSpeedRules.indexOf(playbackParameters.speed)
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+    LaunchedEffect(playing, controlsVisible, speedMenuOpen) {
+        // 控制层显示 3 秒后自动隐藏（暂停态保持可见；倍速菜单打开时先别收）。
+        if (playing && controlsVisible && !speedMenuOpen) { delay(3000); controlsVisible = false }
+    }
+    LaunchedEffect(controlsVisible) {
+        // 控制层被双击等操作收起时，菜单状态跟着复位，否则下次打开控制层会一直不自动隐藏。
+        if (!controlsVisible) speedMenuOpen = false
+    }
+    LaunchedEffect(isFullscreen) {
+        // 竖屏/全屏切换会换一个 SpeedControl 实例，菜单不跨形态保留。
+        speedMenuOpen = false
     }
     // 进度保存已经搬进 PlaybackService（周期兜底 + 切集/暂停/停止落盘）。
     // 这里只在离开播放页时补一次「立即存」命令，不直接读写播放器。
@@ -343,6 +379,8 @@ fun VideoPlayerScreen(
                             when {
                                 longPress -> {
                                     player.setPlaybackSpeed(gestureBaseSpeed)
+                                    // 监听器在浮层在场时会跳过临时速度；松手时显式把控件恢复到用户选的档位。
+                                    speedIndex = PlaybackSpeedRules.indexOf(gestureBaseSpeed)
                                     speedOverlay = null
                                 }
                                 axis == PlayerGestureRules.Axis.HORIZONTAL -> {
@@ -420,22 +458,16 @@ fun VideoPlayerScreen(
                         if (entry.offlineOnly) {
                             Text("离线", fontSize = 10.sp, color = MediaOverlayColors.TextSecondary)
                         }
-                        Surface(
-                            color = MediaOverlayColors.ButtonTint, shape = CircleShape,
-                            onClick = {
-                                speedIndex = (speedIndex + 1) % speeds.size
-                                player.setPlaybackSpeed(speeds[speedIndex])
-                            }
-                        ) {
-                            Text("${speeds[speedIndex]}x".removeSuffix(".0"), color = MediaOverlayColors.TextPrimary,
-                                fontSize = 12.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
-                        }
-                        if (isVideo) {
-                            PlayerIcon(
-                                if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                if (isFullscreen) "退出全屏" else "全屏",
-                                onToggleFullscreen
+                        // 右上角只留方向切换；倍速已合并到下方唯一控件
+                        //（全屏在底部操作行，竖屏在视频下方详情区），不再占右上角。
+                        when (PlayerDisplayRules.orientationToggle(entry.kind, isFullscreen)) {
+                            OrientationToggle.ENTER_FULLSCREEN -> PlayerIcon(
+                                Icons.Default.Fullscreen, "全屏", onToggleFullscreen
                             )
+                            OrientationToggle.EXIT_FULLSCREEN -> PlayerIcon(
+                                Icons.Default.FullscreenExit, "退出全屏", onToggleFullscreen
+                            )
+                            OrientationToggle.NONE -> Unit
                         }
                     }
                     Row(
@@ -493,20 +525,21 @@ fun VideoPlayerScreen(
                         }
                         if (!compact) {
                             // 全屏才有底部操作行；竖屏的操作在视频下方的详情区，不重复塞两排。
+                            // 方向切换只在右上角，这里不再放「退出全屏」；倍速也只保留一个控件。
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 PlayerAction(Icons.Default.SkipPrevious, "上一集", enabled = hasPrev, onClick = onPrev)
                                 Spacer(Modifier.width(20.dp))
                                 PlayerAction(Icons.Default.List, "选集", onClick = onEpisodes)
                                 Spacer(Modifier.weight(1f))
+                                SpeedControl(
+                                    speed = PlaybackSpeedRules.speedAt(speedIndex),
+                                    expanded = speedMenuOpen,
+                                    onExpandedChange = ::setSpeedMenuOpen,
+                                    onSpeedSelected = ::selectSpeed,
+                                    overlay = true
+                                )
+                                Spacer(Modifier.width(20.dp))
                                 PlayerAction(Icons.Default.SkipNext, "下一集", enabled = hasNext, onClick = onNext)
-                                Spacer(Modifier.width(20.dp))
-                                PlayerAction(Icons.Default.FullscreenExit, "退出全屏", onClick = onToggleFullscreen)
-                                Spacer(Modifier.width(20.dp))
-                                PlayerAction(Icons.Default.MoreHoriz, "倍速",
-                                    onClick = {
-                                        speedIndex = (speedIndex + 1) % speeds.size
-                                        player.setPlaybackSpeed(speeds[speedIndex])
-                                    })
                             }
                         }
                     }
@@ -677,8 +710,14 @@ fun VideoPlayerScreen(
                     InfoButton(Icons.Default.SkipNext, "下一集", hasNext, onNext)
                     if (hasEpisodePicker) InfoButton(Icons.Default.List, "选集", true, onEpisodes)
                     Spacer(Modifier.weight(1f))
-                    // 音频没有横屏形态，不显示无意义的全屏按钮。
-                    if (isVideo) InfoButton(Icons.Default.Fullscreen, "全屏", true, onToggleFullscreen)
+                    // 方向切换在视频区右上角；这里放唯一的倍速控件，按钮本身显示当前档位。
+                    SpeedControl(
+                        speed = PlaybackSpeedRules.speedAt(speedIndex),
+                        expanded = speedMenuOpen,
+                        onExpandedChange = ::setSpeedMenuOpen,
+                        onSpeedSelected = ::selectSpeed,
+                        overlay = false
+                    )
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -743,6 +782,62 @@ private fun InfoButton(
         Icon(image, null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(5.dp))
         Text(label, fontSize = 12.sp)
+    }
+}
+
+/**
+ * 唯一的倍速控件：按钮本身显示当前档位（如 1.0x），点开才选档。
+ *
+ * 全屏控制层（[overlay] = true，压在视频上）与竖屏详情区（false，跟随 Material 主题）
+ * 共用同一份状态与同一个下拉菜单，避免两处各显示一份倍速。
+ */
+@Composable
+private fun SpeedControl(
+    speed: Float,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onSpeedSelected: (Float) -> Unit,
+    overlay: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier) {
+        if (overlay) {
+            Surface(
+                color = MediaOverlayColors.ButtonTint,
+                shape = CircleShape,
+                onClick = { onExpandedChange(!expanded) }
+            ) {
+                Text(
+                    PlaybackSpeedRules.label(speed),
+                    color = MediaOverlayColors.TextPrimary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
+                )
+            }
+        } else {
+            OutlinedButton(
+                onClick = { onExpandedChange(!expanded) },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Default.Speed, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(PlaybackSpeedRules.label(speed), fontSize = 12.sp)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
+            PlaybackSpeedRules.OPTIONS.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(PlaybackSpeedRules.label(option)) },
+                    trailingIcon = {
+                        if (option == speed) {
+                            Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
+                        }
+                    },
+                    onClick = { onSpeedSelected(option) }
+                )
+            }
+        }
     }
 }
 

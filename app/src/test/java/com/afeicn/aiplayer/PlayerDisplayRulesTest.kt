@@ -81,4 +81,46 @@ class PlayerDisplayRulesTest {
             PlayerDisplayRules.orientationRequest(true, MediaKind.VIDEO, true, true)
         )
     }
+
+    @Test
+    fun 竖屏右上角是进全屏入口() {
+        assertEquals(
+            OrientationToggle.ENTER_FULLSCREEN,
+            PlayerDisplayRules.orientationToggle(MediaKind.VIDEO, isFullscreen = false)
+        )
+    }
+
+    @Test
+    fun 横屏右上角是退全屏入口() {
+        assertEquals(
+            OrientationToggle.EXIT_FULLSCREEN,
+            PlayerDisplayRules.orientationToggle(MediaKind.VIDEO, isFullscreen = true)
+        )
+    }
+
+    @Test
+    fun 音频没有方向切换入口() {
+        assertEquals(
+            OrientationToggle.NONE,
+            PlayerDisplayRules.orientationToggle(MediaKind.AUDIO, isFullscreen = false)
+        )
+        assertEquals(
+            OrientationToggle.NONE,
+            PlayerDisplayRules.orientationToggle(null, isFullscreen = true)
+        )
+    }
+
+    @Test
+    fun 竖屏点方向切换进入手动全屏() {
+        val next = PlayerDisplayRules.fullscreenToggleState(isFullscreen = false)
+        assertTrue(next.manualFullscreen)
+        assertFalse(next.restoreAutoRotate)
+    }
+
+    @Test
+    fun 全屏点方向切换退出并先锁竖屏() {
+        val next = PlayerDisplayRules.fullscreenToggleState(isFullscreen = true)
+        assertFalse(next.manualFullscreen)
+        assertTrue(next.restoreAutoRotate)
+    }
 }

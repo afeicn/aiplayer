@@ -1,10 +1,14 @@
 package com.afeicn.aiplayer
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -33,6 +37,9 @@ import com.google.common.util.concurrent.ListenableFuture
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+
+    /** 音频路由变化（有线拔出 / 蓝牙断开）广播接收器；随服务注册、销毁。 */
+    private var routeReceiver: BroadcastReceiver? = null
 
     /** 当前队列：与 Media3 播放列表下标一一对应，用于存断点和集号。 */
     private var queue: List<MediaEntry> = emptyList()
@@ -107,9 +114,42 @@ class PlaybackService : MediaSessionService() {
             .setCallback(SessionCallback())
             .build()
         instance = this
+        registerRouteReceiver()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    /**
+     * 路由变化时只暂停，不 `stopSelf()`：
+     * 服务还活着、媒体通知还在，用户可以在通知栏/耳机上继续播放。
+     *
+     * ExoPlayer 的 `setHandleAudioBecomingNoisy(true)` 已经会处理 becoming-noisy；
+     * 这里显式再听一遍同一广播（`isPlaying` 守卫下重复暂停是幂等的），
+     * 同时补上 `ACTION_ACL_DISCONNECTED`——部分 ROM 在蓝牙断连时不发 becoming-noisy。
+     */
+    private fun registerRouteReceiver() {
+        if (routeReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action ?: return
+                val player = mediaSession?.player ?: return
+                if (AudioRouteRules.shouldPause(action, player.playWhenReady)) player.pause()
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(AudioRouteRules.ACTION_AUDIO_BECOMING_NOISY)
+            addAction(AudioRouteRules.ACTION_ACL_DISCONNECTED)
+        }
+        // 普通音乐播放场景不依赖蓝牙/耳机存在；注册失败（极端 ROM）也只是少一路兜底，不能影响起播。
+        runCatching {
+            ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        }.onSuccess { routeReceiver = receiver }
+    }
+
+    private fun unregisterRouteReceiver() {
+        routeReceiver?.let { runCatching { unregisterReceiver(it) } }
+        routeReceiver = null
+    }
 
     /** 从最近任务划掉 = 停止播放，不做音乐 App 那种划掉还继续。 */
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -119,6 +159,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         saveProgress(synchronous = true)
+        unregisterRouteReceiver()
         mainHandler.removeCallbacksAndMessages(null)
         instance = null
         mediaSession?.run {

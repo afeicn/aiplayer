@@ -17,7 +17,40 @@ internal enum class PlayerOrientation {
     SENSOR_LANDSCAPE
 }
 
+/** 播放页右上角唯一的按钮：进全屏 / 退全屏；音频没有横屏形态。 */
+internal enum class OrientationToggle {
+    NONE,
+    ENTER_FULLSCREEN,
+    EXIT_FULLSCREEN
+}
+
+/** 点一次方向切换按钮后，手动全屏标记与「退出后锁竖屏」标记的下一状态。 */
+internal data class FullscreenToggleState(
+    val manualFullscreen: Boolean,
+    val restoreAutoRotate: Boolean
+)
+
 internal object PlayerDisplayRules {
+
+    /** 竖屏 → 进全屏；横屏/全屏 → 退全屏；音频不给入口。 */
+    fun orientationToggle(kind: MediaKind?, isFullscreen: Boolean): OrientationToggle = when {
+        kind != MediaKind.VIDEO -> OrientationToggle.NONE
+        isFullscreen -> OrientationToggle.EXIT_FULLSCREEN
+        else -> OrientationToggle.ENTER_FULLSCREEN
+    }
+
+    /**
+     * 方向切换按钮的状态机：
+     * - 进全屏：手动标记置真，请求横屏；
+     * - 退全屏：清掉手动标记并先锁竖屏，等系统真转回竖屏后再恢复自动旋转
+     *   （否则刚退出就被重力感应转回横屏）。
+     */
+    fun fullscreenToggleState(isFullscreen: Boolean): FullscreenToggleState =
+        if (isFullscreen) {
+            FullscreenToggleState(manualFullscreen = false, restoreAutoRotate = true)
+        } else {
+            FullscreenToggleState(manualFullscreen = true, restoreAutoRotate = false)
+        }
 
     /**
      * 是否渲染全屏播放器。
