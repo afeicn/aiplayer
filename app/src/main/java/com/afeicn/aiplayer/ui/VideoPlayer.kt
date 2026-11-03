@@ -37,11 +37,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.afeicn.aiplayer.AcceleratedSeek
+import com.afeicn.aiplayer.CastViewModel
 import com.afeicn.aiplayer.MediaEntry
 import com.afeicn.aiplayer.MediaKind
 import com.afeicn.aiplayer.OrientationToggle
@@ -104,6 +107,14 @@ fun VideoPlayerScreen(
     var speedMenuOpen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
 
+    // ==================== 投屏（DLNA） ====================
+    val castVm: CastViewModel = viewModel()
+    val castState by castVm.state.collectAsStateWithLifecycle()
+    var castSheetOpen by remember { mutableStateOf(false) }
+    val castActive = castState.activeDevice != null
+    // 投屏时按钮图标跟电视端走（本地播放器已经暂停），否则跟本地播放器。
+    val displayPlaying = if (castActive) !castState.paused else playing
+
     // ==================== 手势层状态（行为对齐 104vplayer GesturePlayerView） ====================
     val activity = remember(context) { context.findActivity() }
     val audioManager = remember(context) {
@@ -125,6 +136,11 @@ fun VideoPlayerScreen(
     }
 
     fun togglePlay() {
+        // 投屏中：播放/暂停发给电视，本地保持暂停。
+        if (castActive) {
+            castVm.togglePlay()
+            return
+        }
         // MediaController 的播放状态经 Binder 异步回传，这里先乐观更新按钮图标。
         if (player.isPlaying) {
             player.pause()
@@ -135,11 +151,21 @@ fun VideoPlayerScreen(
             playing = true
         }
     }
+    /** 本地与电视共用同一个进度：投屏时两边一起跳，停止投屏后位置不跳回。 */
+    fun seekTo(target: Long) {
+        player.seekTo(target)
+        position = target
+        if (castActive) castVm.seekTo(target)
+    }
     fun seekBy(deltaMs: Long) {
         val total = player.duration.coerceAtLeast(0L)
         val target = (player.currentPosition + deltaMs).coerceIn(0L, if (total > 0) total else Long.MAX_VALUE)
-        player.seekTo(target)
-        position = target
+        seekTo(target)
+    }
+    fun openCastSheet() {
+        castSheetOpen = true
+        controlsVisible = true
+        if (!castState.searched && !castActive && !castState.discovering) castVm.discover()
     }
     fun selectSpeed(speed: Float) {
         player.setPlaybackSpeed(speed)
@@ -171,9 +197,24 @@ fun VideoPlayerScreen(
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
     }
-    LaunchedEffect(playing, controlsVisible, speedMenuOpen) {
+    // 开始投屏：本地播放器暂停（电视在播），避免手机外放和电视同时出声。
+    LaunchedEffect(castState.activeDevice) {
+        if (castState.activeDevice != null && player.isPlaying) player.pause()
+    }
+    // 投屏中切下一集：本地队列的 entry 变了，把新一集重新投到同一台电视。
+    LaunchedEffect(entry.uri, castState.activeDevice) {
+        val device = castState.activeDevice ?: return@LaunchedEffect
+        if (entry.isNetwork && castState.castingUri != entry.uri.toString()) {
+            castVm.cast(device, entry)
+        }
+    }
+    // 离开播放页就结束投屏，别让电视继续播而手机侧没有入口可停。
+    DisposableEffect(Unit) {
+        onDispose { castVm.stopCasting() }
+    }
+    LaunchedEffect(displayPlaying, controlsVisible, speedMenuOpen) {
         // 控制层显示 3 秒后自动隐藏（暂停态保持可见；倍速菜单打开时先别收）。
-        if (playing && controlsVisible && !speedMenuOpen) { delay(3000); controlsVisible = false }
+        if (displayPlaying && controlsVisible && !speedMenuOpen) { delay(3000); controlsVisible = false }
     }
     LaunchedEffect(controlsVisible) {
         // 控制层被双击等操作收起时，菜单状态跟着复位，否则下次打开控制层会一直不自动隐藏。
@@ -192,13 +233,16 @@ fun VideoPlayerScreen(
     // 常亮与亮度恢复成对处理：视频播放页在前台就常亮（暂停也常亮，方便看画面找东西），
     // 音频不常亮（听书/听歌一般锁屏后台听）。页面不可见（ON_PAUSE/ON_STOP）立即清除 flag。
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, activity, player, entry.kind) {
+    DisposableEffect(lifecycleOwner, activity, player, entry.kind, castActive) {
         val window = activity?.window
         fun syncKeepScreenOn() {
+            // 投屏中本地播放器是暂停的，但仍处在播放会话里，屏幕保持常亮方便随时操作。
             val keep = entry.kind == MediaKind.VIDEO &&
                 lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
-                player.playbackState != Player.STATE_IDLE &&
-                player.playbackState != Player.STATE_ENDED
+                (castActive || (
+                    player.playbackState != Player.STATE_IDLE &&
+                        player.playbackState != Player.STATE_ENDED
+                    ))
             if (keep) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             else window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
@@ -458,8 +502,15 @@ fun VideoPlayerScreen(
                         if (entry.offlineOnly) {
                             Text("离线", fontSize = 10.sp, color = MediaOverlayColors.TextSecondary)
                         }
-                        // 右上角只留方向切换；倍速已合并到下方唯一控件
-                        //（全屏在底部操作行，竖屏在视频下方详情区），不再占右上角。
+                        // 投屏放在方向切换左侧：最右边的位置仍然只留给横竖屏切换。
+                        if (entry.isNetwork) {
+                            PlayerIcon(
+                                if (castActive) Icons.Default.CastConnected else Icons.Default.Cast,
+                                if (castActive) "投屏中" else "投屏",
+                                ::openCastSheet
+                            )
+                        }
+                        // 倍速已合并到下方唯一控件（全屏在底部操作行，竖屏在视频下方详情区）。
                         when (PlayerDisplayRules.orientationToggle(entry.kind, isFullscreen)) {
                             OrientationToggle.ENTER_FULLSCREEN -> PlayerIcon(
                                 Icons.Default.Fullscreen, "全屏", onToggleFullscreen
@@ -483,7 +534,7 @@ fun VideoPlayerScreen(
                             onClick = { togglePlay() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Crossfade(targetState = playing,
+                                Crossfade(targetState = displayPlaying,
                                     animationSpec = tween(motionDuration(motionOn, Motion.ICON_STATE)),
                                     label = "playPause") { isPlaying ->
                                     Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "暂停或播放",
@@ -510,8 +561,7 @@ fun VideoPlayerScreen(
                                     scrubPosition = (it * duration).toLong()
                                 },
                                 onValueChangeFinished = {
-                                    player.seekTo(scrubPosition)
-                                    position = scrubPosition
+                                    seekTo(scrubPosition)
                                     scrubbing = false
                                 },
                                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp).height(30.dp),
@@ -544,6 +594,16 @@ fun VideoPlayerScreen(
                         }
                     }
                 }
+            }
+
+            // 投屏状态条：画面顶部居中，不占右上角（那里是横竖屏切换）。
+            castState.activeDevice?.let { device ->
+                CastingBanner(
+                    deviceName = device.friendlyName,
+                    paused = castState.paused,
+                    onClick = ::openCastSheet,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 58.dp)
+                )
             }
 
             // ==================== 手势浮层（无点击处理，不拦截触摸） ====================
@@ -677,8 +737,7 @@ fun VideoPlayerScreen(
                                 scrubPosition = (it * duration).toLong()
                             },
                             onValueChangeFinished = {
-                                player.seekTo(scrubPosition)
-                                position = scrubPosition
+                                seekTo(scrubPosition)
                                 scrubbing = false
                             },
                             enabled = duration > 0,
@@ -730,6 +789,18 @@ fun VideoPlayerScreen(
                 }
             }
         }
+    }
+
+    if (castSheetOpen) {
+        CastSheet(
+            state = castState,
+            onDismiss = { castSheetOpen = false },
+            onDiscover = { castVm.discover() },
+            // 从手机当前进度开始投，不把已经在看的内容拉回片头。
+            onCast = { device -> castVm.cast(device, entry, player.currentPosition) },
+            onTogglePlay = { castVm.togglePlay() },
+            onStop = { castVm.stopCasting() }
+        )
     }
 }
 
