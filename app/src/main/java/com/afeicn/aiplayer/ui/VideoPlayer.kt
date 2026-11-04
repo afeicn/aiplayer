@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.afeicn.aiplayer.AcceleratedSeek
@@ -114,6 +115,17 @@ fun VideoPlayerScreen(
     val castActive = castState.activeDevice != null
     // 投屏时按钮图标跟电视端走（本地播放器已经暂停），否则跟本地播放器。
     val displayPlaying = if (castActive) !castState.paused else playing
+
+    // 竖屏播放区跟随视频真实画幅：4:3 / 2.35:1 不再左右留白，16:9 片源和原来一致。
+    var videoStageAspect by remember(player) {
+        mutableFloatStateOf(
+            PlayerDisplayRules.videoStageAspect(
+                player.videoSize.width,
+                player.videoSize.height,
+                player.videoSize.pixelWidthHeightRatio
+            )
+        )
+    }
 
     // ==================== 手势层状态（行为对齐 104vplayer GesturePlayerView） ====================
     val activity = remember(context) { context.findActivity() }
@@ -192,6 +204,12 @@ fun VideoPlayerScreen(
                 if (speedOverlay == null) {
                     speedIndex = PlaybackSpeedRules.indexOf(playbackParameters.speed)
                 }
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                videoStageAspect = PlayerDisplayRules.videoStageAspect(
+                    videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio
+                )
             }
         }
         player.addListener(listener)
@@ -279,7 +297,12 @@ fun VideoPlayerScreen(
                 factory = { viewContext ->
                     PlayerView(viewContext).apply {
                         useController = false
+                        // 画幅不匹配时留黑边，不拉伸、不裁切（字幕通常烧在画面下方）。
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        // 视频画面以外的区域必须是不透明黑色：默认透明会把页面浅色背景透出来，
+                        // 4:3 / 超宽片源看起来就是「左右两条白边」。
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
                         setPlayer(player)
                     }
                 },
@@ -300,7 +323,8 @@ fun VideoPlayerScreen(
     /** 手势 + 控制层 + 浮层，竖屏/全屏共用；compact 只影响间距与底部按钮行。 */
     @Composable
     fun PlayerStage(modifier: Modifier, compact: Boolean) {
-        Box(modifier) {
+        // 播放区底色固定黑色：视频画面之外无论留哪边，都不会露出页面的浅色背景。
+        Box(modifier.background(Color.Black)) {
             ContentCanvas(Modifier.fillMaxSize())
             if (isVideo) {
                 // 手势层：盖在画面上、垫在控件下面——落在按钮/滑块上的点击先被控件自己吃掉。
@@ -701,8 +725,8 @@ fun VideoPlayerScreen(
             Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
                 .statusBarsPadding()
         ) {
-            // 顶部视频区铺满宽度，FIT 不裁切；16:9 是竖屏最自然的占位。
-            PlayerStage(Modifier.fillMaxWidth().aspectRatio(16f / 9f), compact = true)
+            // 顶部视频区铺满宽度，高度按视频真实画幅算（未知时 16:9）；FIT 不裁切。
+            PlayerStage(Modifier.fillMaxWidth().aspectRatio(videoStageAspect), compact = true)
             Column(
                 Modifier.weight(1f).fillMaxWidth()
                     .verticalScroll(rememberScrollState())

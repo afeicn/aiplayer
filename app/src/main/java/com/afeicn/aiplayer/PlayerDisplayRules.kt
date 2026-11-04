@@ -75,6 +75,35 @@ internal object PlayerDisplayRules {
         manualFullscreen -> PlayerOrientation.SENSOR_LANDSCAPE
         else -> PlayerOrientation.UNSPECIFIED
     }
+
+    /** 未知尺寸 / 起步阶段的兜底宽高比。 */
+    const val DEFAULT_VIDEO_ASPECT = 16f / 9f
+
+    /** 竖屏视频容器允许的最窄比例（竖屏短视频再窄就会把详情区挤没）。 */
+    const val MIN_VIDEO_ASPECT = 3f / 4f
+
+    /** 竖屏视频容器允许的最宽比例（超宽电影画幅）。 */
+    const val MAX_VIDEO_ASPECT = 21f / 9f
+
+    /**
+     * 竖屏播放区的宽高比：跟随视频真实画幅，而不是固定 16:9。
+     *
+     * 固定 16:9 时，4:3、2.35:1 这类片源会在左右留出空白（浅色主题下就是白边）。
+     * 未知尺寸退 16:9；极端画幅收敛到 [MIN_VIDEO_ASPECT, MAX_VIDEO_ASPECT]，
+     * 避免竖屏短视频把播放区撑得比屏幕还高。
+     *
+     * [pixelWidthHeightRatio] 是变形宽银幕的像素宽高比，计算时要乘上。
+     */
+    fun videoStageAspect(
+        videoWidth: Int,
+        videoHeight: Int,
+        pixelWidthHeightRatio: Float = 1f
+    ): Float {
+        if (videoWidth <= 0 || videoHeight <= 0) return DEFAULT_VIDEO_ASPECT
+        val ratio = videoWidth * pixelWidthHeightRatio / videoHeight
+        if (!ratio.isFinite() || ratio <= 0f) return DEFAULT_VIDEO_ASPECT
+        return ratio.coerceIn(MIN_VIDEO_ASPECT, MAX_VIDEO_ASPECT)
+    }
 }
 
 /**

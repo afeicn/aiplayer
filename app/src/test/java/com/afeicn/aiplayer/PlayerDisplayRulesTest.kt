@@ -123,4 +123,72 @@ class PlayerDisplayRulesTest {
         assertFalse(next.manualFullscreen)
         assertTrue(next.restoreAutoRotate)
     }
+
+    // ==================== 竖屏播放区画幅 ====================
+
+    @Test
+    fun 标准十六比九片源保持原有画幅() {
+        assertEquals(
+            16f / 9f,
+            PlayerDisplayRules.videoStageAspect(1920, 1080),
+            0.001f
+        )
+    }
+
+    @Test
+    fun 四比三片源不再按十六比九留左右白边() {
+        assertEquals(
+            4f / 3f,
+            PlayerDisplayRules.videoStageAspect(1440, 1080),
+            0.001f
+        )
+    }
+
+    @Test
+    fun 超宽片源收敛到二十一比九() {
+        assertEquals(
+            PlayerDisplayRules.MAX_VIDEO_ASPECT,
+            PlayerDisplayRules.videoStageAspect(1920, 800),
+            0.001f
+        )
+    }
+
+    @Test
+    fun 竖屏短视频收敛到三比四避免撑爆屏幕() {
+        assertEquals(
+            PlayerDisplayRules.MIN_VIDEO_ASPECT,
+            PlayerDisplayRules.videoStageAspect(1080, 1920),
+            0.001f
+        )
+    }
+
+    @Test
+    fun 尺寸未知时退回十六比九() {
+        assertEquals(
+            PlayerDisplayRules.DEFAULT_VIDEO_ASPECT,
+            PlayerDisplayRules.videoStageAspect(0, 0),
+            0.001f
+        )
+        assertEquals(
+            PlayerDisplayRules.DEFAULT_VIDEO_ASPECT,
+            PlayerDisplayRules.videoStageAspect(-1, 1080),
+            0.001f
+        )
+    }
+
+    @Test
+    fun 变形宽银幕乘上像素宽高比() {
+        // 1440x1080 的 4:3 存储，按 1.333 像素比显示就是 16:9。
+        assertEquals(
+            16f / 9f,
+            PlayerDisplayRules.videoStageAspect(1440, 1080, pixelWidthHeightRatio = 4f / 3f),
+            0.001f
+        )
+        // 非法像素比退回 16:9，不能算出 0 或 NaN。
+        assertEquals(
+            PlayerDisplayRules.DEFAULT_VIDEO_ASPECT,
+            PlayerDisplayRules.videoStageAspect(1920, 1080, pixelWidthHeightRatio = 0f),
+            0.001f
+        )
+    }
 }
