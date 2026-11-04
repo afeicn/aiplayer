@@ -490,6 +490,8 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
 
     val downloads: StateFlow<List<OfflineDownload>> = OfflineDownloadManager.downloads
     val pendingRemoval: StateFlow<Set<String>> = OfflineDownloadManager.pendingRemoval
+    /** 缓存占用由后台统计后发布，界面不再在主线程遍历下载目录。 */
+    val cacheSizeText: StateFlow<String> = OfflineDownloadManager.cacheSizeTextFlow
 
     private val _allowMobileData = MutableStateFlow(AppContainer.downloadPrefs.allowMobileData())
     val allowMobileData: StateFlow<Boolean> = _allowMobileData.asStateFlow()
@@ -502,6 +504,8 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
         pollJob = viewModelScope.launch {
             while (true) {
                 OfflineDownloadManager.refresh()
+                // TTL 内部去重：这里每 800ms 调一次也只在到期后真遍历文件树。
+                OfflineDownloadManager.refreshCacheSpace(AppContainer.appContext)
                 delay(800)
             }
         }
@@ -530,8 +534,6 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
         _allowMobileData.value = value
         OfflineDownloadManager.onNetworkPreferenceChanged()
     }
-
-    fun cacheSizeText(): String = OfflineDownloadManager.cacheSizeText(AppContainer.appContext)
 }
 
 // ==================== 首页（离线库） ====================

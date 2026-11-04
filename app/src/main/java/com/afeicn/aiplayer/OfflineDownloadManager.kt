@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
+import android.os.SystemClock
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -51,6 +52,15 @@ object OfflineDownloadManager {
     /** 单条删除的「撤销窗口」内待真正删除的 id 集合；UI 层据此隐藏条目并显示撤销条。 */
     private val _pendingRemoval = MutableStateFlow<Set<String>>(emptySet())
     val pendingRemoval: StateFlow<Set<String>> = _pendingRemoval.asStateFlow()
+
+    /**
+     * 缓存占用文案。目录里有上万个 HLS 分片，统计要遍历整棵文件树，
+     * 只能在 IO 线程算、算完缓存，绝不能在主线程或每次轮询时重算。
+     */
+    private val _cacheSizeText = MutableStateFlow("")
+    val cacheSizeTextFlow: StateFlow<String> = _cacheSizeText.asStateFlow()
+    private var cacheSpaceJob: Job? = null
+    private var cacheSpaceComputedAt = 0L
 
     /** 「获取地址中」占位任务的 id 集合（无 Media3 记录，由 [SubscriptionPipeline] 后台解析推进）。 */
     private val _resolvingIds = MutableStateFlow<Set<String>>(emptySet())
@@ -356,7 +366,7 @@ object OfflineDownloadManager {
         if (patched) withContext(kotlinx.coroutines.Dispatchers.IO) { refresh() }
     }
 
-    /** 缓存占用（直接统计缓存目录文件大小，含在线播放顺手写入的缓存分片）。 */
+    /** 统计下载目录占用（含在线播放顺手写入的缓存分片）。会遍历文件树，调用方必须在后台线程。 */
     fun cacheSpaceBytes(context: Context): Long {
         val dir = File(context.applicationContext.filesDir, "downloads")
         if (!dir.exists()) return 0L
@@ -365,7 +375,31 @@ object OfflineDownloadManager {
         }.getOrDefault(0L)
     }
 
-    fun cacheSizeText(context: Context): String = OfflineDownloadRules.formatBytes(cacheSpaceBytes(context))
+    /**
+     * 缓存占用文案（同步返回当前缓存值，不会碰文件树）。
+     *
+     * 第一次调用返回空串，同时把统计排到 IO 线程；算完后 [cacheSizeTextFlow] 更新，
+     * UI 下一次轮询/重组就能拿到。轮询频率再高也只按 [CacheSpaceRules.TTL_MS] 重算。
+     */
+    fun cacheSizeText(context: Context): String {
+        refreshCacheSpace(context)
+        return _cacheSizeText.value
+    }
+
+    /** 后台重算缓存占用；[force] = false 时按 TTL 去重，重复调用不重复遍历。 */
+    fun refreshCacheSpace(context: Context, force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!CacheSpaceRules.shouldRefresh(now, cacheSpaceComputedAt, cacheSpaceJob?.isActive == true, force)) {
+            return
+        }
+        cacheSpaceComputedAt = now
+        cacheSpaceJob = scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                OfflineDownloadRules.formatBytes(cacheSpaceBytes(context))
+            }
+            _cacheSizeText.value = text
+        }
+    }
 
     fun downloadIds(): Set<String> {
         val active = manager?.currentDownloads?.map { it.request.id }.orEmpty()

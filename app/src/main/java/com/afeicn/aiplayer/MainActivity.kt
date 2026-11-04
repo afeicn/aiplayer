@@ -228,6 +228,7 @@ private fun PlayerApp(activity: MainActivity) {
     val searchState by searchVm.state.collectAsStateWithLifecycle()
     val downloads by downloadsVm.downloads.collectAsStateWithLifecycle()
     val pendingRemoval by downloadsVm.pendingRemoval.collectAsStateWithLifecycle()
+    val downloadsCacheSizeText by downloadsVm.cacheSizeText.collectAsStateWithLifecycle()
     val allowMobileData by downloadsVm.allowMobileData.collectAsStateWithLifecycle()
     val sourcesState by sourcesVm.state.collectAsStateWithLifecycle()
     val sheetState by sheetVm.state.collectAsStateWithLifecycle()
@@ -625,7 +626,7 @@ private fun PlayerApp(activity: MainActivity) {
             Page.DOWNLOADS -> DownloadsScreen(
                 downloads = downloads,
                 pendingRemoval = pendingRemoval,
-                cacheSizeText = downloadsVm.cacheSizeText(),
+                cacheSizeText = downloadsCacheSizeText,
                 onBack = ::goBack,
                 onSettings = { page = Page.SOURCES },
                 onPause = { downloadsVm.pause(it) },
